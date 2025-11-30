@@ -2,10 +2,7 @@ version: '3.8'
 
 services:
   mackuper:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile
-    image: mackuper:latest
+    image: lirem/mackuper:latest
     container_name: mackuper
     restart: unless-stopped
     ports:
@@ -15,8 +12,9 @@ services:
     environment:
       - FLASK_ENV=production
       - FLASK_APP=app
-      # Optional: Override secret key
+      # Optional: Override secret key (auto-generated if not set)
       # - SECRET_KEY=your-secret-key-here
+      # Note: SECRET_KEY is auto-generated and persisted to /data/.secret_key on first run
     healthcheck:
       test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:5000/health')"]
       interval: 30s

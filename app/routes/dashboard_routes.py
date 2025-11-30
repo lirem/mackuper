@@ -149,3 +149,17 @@ def get_scheduled_jobs_info():
     """
     scheduled = get_scheduled_jobs()
     return jsonify(scheduled)
+
+
+@bp.route('/scheduler-diagnostics', methods=['GET'])
+@login_required
+def get_scheduler_diagnostics_endpoint():
+    """
+    Get detailed scheduler diagnostics.
+
+    Returns:
+        JSON with scheduler state, jobs, and health information
+    """
+    from app.scheduler import get_scheduler_diagnostics
+    diagnostics = get_scheduler_diagnostics()
+    return jsonify(diagnostics)

@@ -14,6 +14,7 @@ function getEmptyJobForm() {
         source_type: 'local',
         source_config: {
             paths: [],
+            exclude_patterns: [],
             hostname: '',
             port: 22,
             username: '',
@@ -117,6 +118,7 @@ function renderJobCard(job) {
                             <p class="text-gray-900 truncate" title="${escapeHtml(pathsDisplay)}">${escapeHtml(pathsDisplay)}</p>
                         </div>
                     </div>
+                    ${job.source_config?.exclude_patterns?.length > 0 ? `<div class="mt-3 text-sm"><span class="text-gray-500">Excludes:</span><p class="text-gray-900 truncate" title="${escapeHtml(job.source_config.exclude_patterns.join(', '))}">${escapeHtml(job.source_config.exclude_patterns.join(', '))}</p></div>` : ''}
                 </div>
 
                 <div class="flex flex-col gap-2 ml-4">
@@ -249,11 +251,17 @@ function renderJobForm() {
 
 function renderLocalSourceForm(formData) {
     const paths = formData.source_config?.paths || [];
+    const excludePatterns = formData.source_config?.exclude_patterns || [];
     return `
         <div>
             <label class="form-label">Paths to Backup (one per line) *</label>
             <textarea class="form-input" name="paths" rows="4" required>${paths.join('\n')}</textarea>
             <p class="text-xs text-gray-500 mt-1">Example: /path/to/backup</p>
+        </div>
+        <div class="mt-4">
+            <label class="form-label">Exclude Patterns (one per line)</label>
+            <textarea class="form-input" name="exclude_patterns" rows="3">${excludePatterns.join('\n')}</textarea>
+            <p class="text-xs text-gray-500 mt-1">Glob patterns to exclude files/directories. Examples: *.pyc, node_modules, __pycache__, .venv</p>
         </div>
     `;
 }
@@ -317,6 +325,11 @@ async function saveJob(event) {
     };
 
     const sourceType = formData.get('source_type');
+    if (sourceType === 'local') {
+        const excludePatternsInput = formData.get('exclude_patterns') || '';
+        sourceConfig.exclude_patterns = excludePatternsInput.split('\n').map(p => p.trim()).filter(p => p);
+    }
+
     if (sourceType === 'ssh') {
         sourceConfig.hostname = formData.get('ssh_hostname');
         sourceConfig.port = parseInt(formData.get('ssh_port'));

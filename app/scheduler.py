@@ -7,9 +7,10 @@ Manages:
 - Manual job triggers
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.date import DateTrigger
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.executors.pool import ThreadPoolExecutor
 
@@ -19,8 +20,9 @@ from app.backup.executor import execute_backup_job
 from app.backup.retention import enforce_retention_policies
 
 
-# Global scheduler instance
+# Global scheduler instance and Flask app reference
 scheduler = None
+flask_app = None
 
 
 def init_scheduler(app):
@@ -30,10 +32,13 @@ def init_scheduler(app):
     Args:
         app: Flask app instance
     """
-    global scheduler
+    global scheduler, flask_app
 
     if scheduler is not None:
         return scheduler
+
+    # Store Flask app reference for use in background threads
+    flask_app = app
 
     # Configure job stores and executors
     jobstores = {
@@ -83,7 +88,19 @@ def start_scheduler():
 
     if not scheduler.running:
         scheduler.start()
-        print("APScheduler started")
+        print(f"APScheduler started successfully (state={scheduler.state}, running={scheduler.running})")
+
+        # Log currently scheduled jobs
+        jobs = scheduler.get_jobs()
+        if jobs:
+            print(f"Loaded {len(jobs)} scheduled jobs:")
+            for job in jobs:
+                next_run = job.next_run_time.isoformat() if job.next_run_time else 'N/A'
+                print(f"  - {job.id}: {job.name} (next run: {next_run})")
+        else:
+            print("No scheduled jobs loaded")
+    else:
+        print(f"Scheduler already running (state={scheduler.state})")
 
 
 def stop_scheduler():
@@ -107,6 +124,18 @@ def sync_backup_jobs():
 
     if scheduler is None:
         raise RuntimeError("Scheduler not initialized")
+
+    # Clean up old manual jobs (one-time jobs from previous "Run Now" clicks)
+    # These jobs have already been executed or missed their window
+    all_jobs = scheduler.get_jobs()
+    for job in all_jobs:
+        if job.id.startswith('manual_'):
+            try:
+                # Remove old manual trigger jobs
+                scheduler.remove_job(job.id)
+                print(f"Cleaned up old manual job: {job.id}")
+            except Exception as e:
+                print(f"Failed to remove old manual job {job.id}: {e}")
 
     # Get all jobs from database
     backup_jobs = BackupJob.query.all()
@@ -221,7 +250,7 @@ def _remove_scheduled_job(backup_job_id: int):
         print(f"Failed to remove backup job {backup_job_id}: {e}")
 
 
-def _execute_backup_wrapper(job_id: int):
+def _execute_backup_wrapper(job_id: int, allow_disabled: bool = False):
     """
     Wrapper function for executing backup jobs in scheduler context.
 
@@ -230,14 +259,15 @@ def _execute_backup_wrapper(job_id: int):
 
     Args:
         job_id: BackupJob ID to execute
+        allow_disabled: If True, allow execution of disabled jobs (for manual triggers)
     """
-    from flask import current_app
+    global flask_app
 
-    # Execute within app context
-    with current_app.app_context():
+    # Execute within app context using stored Flask app reference
+    with flask_app.app_context():
         try:
-            print(f"Scheduler executing backup job ID: {job_id}")
-            history = execute_backup_job(job_id)
+            print(f"Scheduler executing backup job ID: {job_id} (allow_disabled={allow_disabled})")
+            history = execute_backup_job(job_id, allow_disabled=allow_disabled)
             print(f"Backup job {job_id} completed with status: {history.status}")
         except Exception as e:
             print(f"Scheduler backup job {job_id} failed: {e}")
@@ -263,11 +293,13 @@ def trigger_backup_now(job_id: int):
     if not backup_job:
         raise ValueError(f"Backup job not found: {job_id}")
 
-    # Add one-time job
+    # Add one-time job with immediate trigger (1 second delay to avoid race condition)
+    # Use timezone-aware datetime to ensure correct scheduling across all timezones
     scheduler.add_job(
         func=_execute_backup_wrapper,
-        args=[job_id],
-        id=f"manual_{job_id}_{int(datetime.utcnow().timestamp())}",
+        args=[job_id, True],  # True = allow_disabled for manual triggers
+        trigger=DateTrigger(run_date=datetime.now(timezone.utc) + timedelta(seconds=1)),
+        id=f"manual_{job_id}_{int(datetime.now(timezone.utc).timestamp())}",
         name=f"Manual: {backup_job.name}",
         replace_existing=False
     )
@@ -309,3 +341,48 @@ def is_scheduler_running() -> bool:
     """
     global scheduler
     return scheduler is not None and scheduler.running
+
+
+def get_scheduler_diagnostics() -> dict:
+    """
+    Get detailed scheduler diagnostics for troubleshooting.
+
+    Returns:
+        Dict with scheduler state, jobs, and health info
+    """
+    global scheduler
+
+    if scheduler is None:
+        return {
+            'initialized': False,
+            'running': False,
+            'state': 'NOT_INITIALIZED',
+            'error': 'Scheduler has not been initialized'
+        }
+
+    try:
+        jobs = scheduler.get_jobs()
+        job_info = []
+        for job in jobs:
+            job_info.append({
+                'id': job.id,
+                'name': job.name,
+                'next_run': job.next_run_time.isoformat() if job.next_run_time else None,
+                'trigger': str(job.trigger),
+                'pending': job.pending
+            })
+
+        return {
+            'initialized': True,
+            'running': scheduler.running,
+            'state': str(scheduler.state),
+            'job_count': len(jobs),
+            'jobs': job_info
+        }
+    except Exception as e:
+        return {
+            'initialized': True,
+            'running': False,
+            'state': 'ERROR',
+            'error': str(e)
+        }

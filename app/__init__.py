@@ -121,18 +121,31 @@ def create_app(config_name=None):
         from app import models
         db.create_all()
 
-    # Initialize and start scheduler
-    from app.scheduler import init_scheduler, start_scheduler, sync_backup_jobs
-    init_scheduler(app)
-    start_scheduler()
-
-    # Sync backup jobs from database to scheduler
-    with app.app_context():
-        sync_backup_jobs()
-
-    # Register cleanup function to stop scheduler on app shutdown
+    # Initialize and start scheduler (only in child process when using reloader)
+    from app.scheduler import init_scheduler, start_scheduler, sync_backup_jobs, stop_scheduler
     import atexit
-    from app.scheduler import stop_scheduler
-    atexit.register(stop_scheduler)
+
+    # Check if we're in the reloader parent process
+    # werkzeug sets WERKZEUG_RUN_MAIN in child process only
+    is_reloader_child = os.environ.get('WERKZEUG_RUN_MAIN') == 'true'
+    is_development = app.config.get('DEBUG', False)
+
+    # Only initialize scheduler if:
+    # 1. Not in development mode, OR
+    # 2. In development mode AND in the reloader child process
+    if not is_development or is_reloader_child:
+        app.logger.info("Initializing scheduler...")
+        init_scheduler(app)
+        start_scheduler()
+
+        # Sync backup jobs from database to scheduler
+        with app.app_context():
+            sync_backup_jobs()
+
+        # Register cleanup function to stop scheduler on app shutdown
+        atexit.register(stop_scheduler)
+        app.logger.info("Scheduler initialized and started")
+    else:
+        app.logger.info("Skipping scheduler initialization (reloader parent process)")
 
     return app
