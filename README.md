@@ -195,6 +195,46 @@ Back up files from the server running Mackuper:
 - **Source Path**: `/path/to/directory` or `/path/to/file`
 - Example: `/home/user/documents`
 
+**Important:** By default, the Docker container can only access files inside the container. To backup files from your **host machine**, you need to mount them into the container.
+
+**Mounting Host Directories:**
+
+1. **Using docker-compose.yml** (Recommended):
+
+   Edit [docker-compose.yml](docker-compose.yml) to add volume mounts:
+   ```yaml
+   volumes:
+     - mackuper-data:/data
+     - /path/on/host:/backup/documents:ro     # Mount host directory (read-only)
+     - /var/www/html:/backup/websites:ro      # Another example
+   ```
+
+   Then restart: `docker-compose down && docker-compose up -d`
+
+2. **Using docker run command:**
+
+   Add `-v` flags when running the container:
+   ```bash
+   docker run -d \
+     --name mackuper \
+     -p 5000:5000 \
+     -v mackuper-data:/data \
+     -v /home/user/documents:/backup/documents:ro \
+     -v /var/www/html:/backup/websites:ro \
+     --restart unless-stopped \
+     lirem/mackuper:latest
+   ```
+
+**Creating Backup Jobs for Mounted Directories:**
+- **Source Type**: Select "Local"
+- **Source Path**: Use the container path (e.g., `/backup/documents`)
+- The `:ro` flag mounts directories as read-only for safety
+
+**Example:**
+- Host path: `/home/user/documents`
+- Mount in docker-compose: `/home/user/documents:/backup/docs:ro`
+- Backup job source path: `/backup/docs`
+
 #### SSH Source
 Back up files from a remote server via SSH/SFTP:
 - **Hostname**: Remote server address
