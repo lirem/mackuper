@@ -6,7 +6,19 @@ class Config:
     """Base configuration"""
 
     # Flask
-    SECRET_KEY = os.environ.get('SECRET_KEY') or os.urandom(32).hex()
+    # Get SECRET_KEY from environment, or generate a persistent one in development
+    SECRET_KEY = os.environ.get('SECRET_KEY')
+    if not SECRET_KEY:
+        # Try to read from persistent file in /data directory
+        secret_file = '/data/.secret_key'
+        if os.path.exists(secret_file):
+            with open(secret_file, 'r') as f:
+                SECRET_KEY = f.read().strip()
+        else:
+            # Fallback for development mode - this will cause issues in production
+            import secrets
+            SECRET_KEY = secrets.token_hex(32)
+            print("WARNING: Using non-persistent SECRET_KEY. Set SECRET_KEY environment variable.")
 
     # Database
     SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL') or 'sqlite:////data/mackuper.db'

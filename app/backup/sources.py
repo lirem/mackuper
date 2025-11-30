@@ -11,6 +11,7 @@ import shutil
 import tempfile
 from pathlib import Path
 from typing import List, Dict, Any
+from fnmatch import fnmatch
 import paramiko
 from paramiko import SSHClient, AutoAddPolicy
 
@@ -28,15 +29,43 @@ class LocalSource:
     for archiving.
     """
 
-    def __init__(self, paths: List[str]):
+    def __init__(self, paths: List[str], exclude_patterns: List[str] = None):
         """
         Initialize local source handler.
 
         Args:
             paths: List of file/directory paths to backup
+            exclude_patterns: List of glob patterns to exclude (e.g., *.pyc, __pycache__, .venv)
         """
         self.paths = paths
+        self.exclude_patterns = exclude_patterns or []
         self.temp_dir = None
+
+    def _should_exclude(self, path: Path) -> bool:
+        """
+        Check if a path should be excluded based on exclude patterns.
+
+        Args:
+            path: Path to check
+
+        Returns:
+            True if path matches any exclude pattern, False otherwise
+        """
+        if not self.exclude_patterns:
+            return False
+
+        path_str = str(path)
+        path_name = path.name
+
+        for pattern in self.exclude_patterns:
+            # Match against full path or just the name
+            if fnmatch(path_str, pattern) or fnmatch(path_name, pattern):
+                return True
+            # Also match against relative path patterns
+            if pattern.startswith('**/') and fnmatch(path_name, pattern[3:]):
+                return True
+
+        return False
 
     def acquire(self, temp_dir: str) -> List[str]:
         """
@@ -67,10 +96,20 @@ class LocalSource:
 
             try:
                 if source_path.is_file():
-                    shutil.copy2(source_path, dest_path)
-                    acquired_paths.append(str(dest_path))
+                    if not self._should_exclude(source_path):
+                        shutil.copy2(source_path, dest_path)
+                        acquired_paths.append(str(dest_path))
                 elif source_path.is_dir():
-                    shutil.copytree(source_path, dest_path, symlinks=False)
+                    # Use ignore parameter to exclude patterns during copytree
+                    def ignore_patterns(directory, files):
+                        ignored = []
+                        for name in files:
+                            file_path = Path(directory) / name
+                            if self._should_exclude(file_path):
+                                ignored.append(name)
+                        return ignored
+
+                    shutil.copytree(source_path, dest_path, symlinks=False, ignore=ignore_patterns)
                     acquired_paths.append(str(dest_path))
                 else:
                     raise SourceError(f"Unsupported path type: {path}")
@@ -107,7 +146,7 @@ class SSHSource:
                 - private_key: Path to private key file (optional)
                 - paths: List of remote paths to backup
         """
-        self.host = config.get('host')
+        self.host = config.get('host') or config.get('hostname')
         self.port = config.get('port', 22)
         self.username = config.get('username')
         self.password = config.get('password')
@@ -279,7 +318,8 @@ def create_source(source_type: str, config: Dict[str, Any]):
     """
     if source_type == 'local':
         paths = config.get('paths', [])
-        return LocalSource(paths)
+        exclude_patterns = config.get('exclude_patterns', [])
+        return LocalSource(paths, exclude_patterns)
     elif source_type == 'ssh':
         return SSHSource(config)
     else:

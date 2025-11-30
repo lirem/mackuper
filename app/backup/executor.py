@@ -255,25 +255,26 @@ class BackupExecutor:
         print(log_entry)  # Also print to console for debugging
 
 
-def execute_backup_job(job_id: int) -> BackupHistory:
+def execute_backup_job(job_id: int, allow_disabled: bool = False) -> BackupHistory:
     """
     Execute a backup job by ID.
 
     Args:
         job_id: ID of BackupJob to execute
+        allow_disabled: If True, allow execution of disabled jobs (for manual triggers)
 
     Returns:
         BackupHistory record with execution results
 
     Raises:
-        ValueError: If job not found or disabled
+        ValueError: If job not found, or if disabled and not allowed
     """
     job = BackupJob.query.get(job_id)
 
     if not job:
         raise ValueError(f"Backup job not found: {job_id}")
 
-    if not job.enabled:
+    if not job.enabled and not allow_disabled:
         raise ValueError(f"Backup job is disabled: {job.name}")
 
     executor = BackupExecutor(job)

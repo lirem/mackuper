@@ -34,6 +34,10 @@ RUN useradd -m -u 1000 -s /bin/bash mackuper && \
     mkdir -p /data /app && \
     chown -R mackuper:mackuper /data /app
 
+# Copy and set up entrypoint script (do this before switching to non-root user)
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN chmod 755 /entrypoint.sh
+
 # Copy application code
 COPY --chown=mackuper:mackuper . .
 
@@ -53,5 +57,5 @@ EXPOSE 5000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD python -c "import requests; requests.get('http://localhost:5000/health')" || exit 1
 
-# Run the application with Gunicorn
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "--timeout", "120", "--access-logfile", "-", "--error-logfile", "-", "app:create_app()"]
+# Set entrypoint
+ENTRYPOINT ["/entrypoint.sh"]
