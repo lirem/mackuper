@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  mackuper:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: mackuper:latest
+    container_name: mackuper
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    volumes:
+      - mackuper-data:/data
+    environment:
+      - FLASK_ENV=production
+      - FLASK_APP=app
+      # Optional: Override secret key
+      # - SECRET_KEY=your-secret-key-here
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:5000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - mackuper-network
+
+volumes:
+  mackuper-data:
+    driver: local
+
+networks:
+  mackuper-network:
+    driver: bridge
