@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  mackuper-dev:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: mackuper-dev
+    ports:
+      - "5001:5000"
+    volumes:
+      - mackuper-dev-data:/data
+    environment:
+      - FLASK_ENV=production
+      - FLASK_APP=app
+    networks:
+      - mackuper-dev-network
+
+volumes:
+  mackuper-dev-data:
+    driver: local
+
+networks:
+  mackuper-dev-network:
+    driver: bridge

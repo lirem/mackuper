@@ -116,10 +116,41 @@ def create_app(config_name=None):
     def health():
         return {'status': 'healthy'}, 200
 
-    # Initialize database
+    # Initialize database schema and run migrations
+    from app import models
+    from app.migrations import init_database_schema
+
+    # This handles both fresh installations and existing databases with migrations
+    init_database_schema(app)
+
+    # Auto-initialize crypto manager from stored password
     with app.app_context():
-        from app import models
-        db.create_all()
+        from app.models import EncryptionKey
+        from app.utils.crypto import crypto_manager
+        from app.utils.master_key import get_master_key_manager
+
+        app.logger.info("Checking for stored encryption password...")
+
+        encryption_key_record = EncryptionKey.query.first()
+
+        if encryption_key_record and encryption_key_record.password_encrypted:
+            try:
+                # Decrypt the stored password
+                master_key_manager = get_master_key_manager(app)
+                user_password = master_key_manager.decrypt_password(
+                    encryption_key_record.password_encrypted
+                )
+
+                # Initialize crypto manager with decrypted password
+                crypto_manager.initialize(user_password, encryption_key_record.key_encrypted)
+
+                app.logger.info("Crypto manager auto-initialized successfully from stored password")
+
+            except Exception as e:
+                app.logger.error(f"Failed to auto-initialize crypto manager: {e}")
+                app.logger.warning("Scheduled backups will fail until user logs in")
+        else:
+            app.logger.info("No stored password found - crypto manager will initialize on first login")
 
     # Initialize and start scheduler (only in child process when using reloader)
     from app.scheduler import init_scheduler, start_scheduler, sync_backup_jobs, stop_scheduler

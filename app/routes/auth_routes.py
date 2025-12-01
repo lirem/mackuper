@@ -2,7 +2,8 @@
 Authentication routes: login, logout, and first-run setup wizard.
 """
 
-from flask import Blueprint, render_template, request, redirect, url_for, flash, session
+from datetime import datetime
+from flask import Blueprint, render_template, request, redirect, url_for, flash, session, current_app
 from flask_login import login_user, logout_user, login_required
 from app import db
 from app.models import User, AWSSettings, EncryptionKey
@@ -42,6 +43,25 @@ def login():
         encryption_key = EncryptionKey.query.first()
         if encryption_key:
             crypto_manager.initialize(password, encryption_key.key_encrypted)
+
+        # Save encrypted password for auto-unlock on startup
+        try:
+            from app.utils.master_key import get_master_key_manager
+
+            master_key_manager = get_master_key_manager(current_app)
+            encrypted_password = master_key_manager.encrypt_password(password)
+
+            # Update the encryption_key record with encrypted password
+            if encryption_key:
+                encryption_key.password_encrypted = encrypted_password
+                encryption_key.updated_at = datetime.utcnow()
+                db.session.commit()
+                current_app.logger.info("Encrypted password saved for auto-unlock")
+
+        except Exception as e:
+            # Don't fail login if password encryption fails
+            current_app.logger.error(f"Failed to save encrypted password: {e}")
+            flash('Warning: Auto-unlock may not work on restart', 'warning')
 
         # Store password in session for re-initialization
         session['user_password'] = password
@@ -163,6 +183,18 @@ def setup():
                 salt = crypto_manager.initialize(password)
                 encryption_key = EncryptionKey(key_encrypted=salt)
                 db.session.add(encryption_key)
+
+                # Save encrypted password for auto-unlock
+                try:
+                    from app.utils.master_key import get_master_key_manager
+
+                    master_key_manager = get_master_key_manager(current_app)
+                    encrypted_password = master_key_manager.encrypt_password(password)
+                    encryption_key.password_encrypted = encrypted_password
+
+                except Exception as e:
+                    # Log but don't fail setup
+                    print(f"Warning: Failed to save encrypted password during setup: {e}")
 
                 # Encrypt and save AWS settings
                 aws_settings = AWSSettings(
