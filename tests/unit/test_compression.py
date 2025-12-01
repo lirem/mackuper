@@ -14,6 +14,7 @@ import pytest
 from app.backup.compression import (
     create_archive,
     generate_archive_filename,
+    strip_archive_extension,
     get_archive_size,
     CompressionError
 )
@@ -193,7 +194,7 @@ class TestGenerateArchiveFilename:
         """Test basic filename generation."""
         filename = generate_archive_filename("test_job", "tar.gz")
 
-        assert filename.startswith("test_job_")
+        assert filename.startswith("test_job-")
         assert filename.endswith(".tar.gz")
 
     def test_generate_filename_with_spaces(self):
@@ -235,13 +236,54 @@ class TestGenerateArchiveFilename:
         # Both should have timestamp format YYYYMMDD_HHMMSS
         assert "_" in filename1
         # Timestamps might be same if generated in same second, but format should be there
-        assert len(filename1.split("_")) >= 3  # job_YYYYMMDD_HHMMSS.ext
+        # New format: job-YYYYMMDD_HHMMSS.ext (split on underscore gives 2+ parts)
+        assert len(filename1.split("_")) >= 2
 
     def test_generate_filename_alphanumeric_preserved(self):
         """Test that alphanumeric characters and hyphens/underscores are preserved."""
         filename = generate_archive_filename("job-name_123", "zip")
 
         assert "job-name_123" in filename
+
+
+class TestStripArchiveExtension:
+    """Test strip_archive_extension function."""
+
+    def test_strip_tar_gz_extension(self):
+        """Test stripping .tar.gz extension."""
+        filename = "backup-20251130_143022.tar.gz"
+        result = strip_archive_extension(filename)
+        assert result == "backup-20251130_143022"
+
+    def test_strip_tar_bz2_extension(self):
+        """Test stripping .tar.bz2 extension."""
+        filename = "backup-20251130_143022.tar.bz2"
+        result = strip_archive_extension(filename)
+        assert result == "backup-20251130_143022"
+
+    def test_strip_tar_xz_extension(self):
+        """Test stripping .tar.xz extension."""
+        filename = "backup-20251130_143022.tar.xz"
+        result = strip_archive_extension(filename)
+        assert result == "backup-20251130_143022"
+
+    def test_strip_zip_extension(self):
+        """Test stripping .zip extension."""
+        filename = "backup-20251130_143022.zip"
+        result = strip_archive_extension(filename)
+        assert result == "backup-20251130_143022"
+
+    def test_strip_tar_extension(self):
+        """Test stripping .tar extension."""
+        filename = "backup-20251130_143022.tar"
+        result = strip_archive_extension(filename)
+        assert result == "backup-20251130_143022"
+
+    def test_strip_unknown_extension(self):
+        """Test fallback for unknown extensions."""
+        filename = "backup.unknown"
+        result = strip_archive_extension(filename)
+        assert result == "backup"
 
 
 class TestGetArchiveSize:

@@ -23,7 +23,7 @@ from app import db
 from app.models import BackupJob, BackupHistory, AWSSettings
 from app.utils.crypto import crypto_manager
 from .sources import create_source, SourceError
-from .compression import create_archive, generate_archive_filename, get_archive_size, CompressionError
+from .compression import create_archive, generate_archive_filename, strip_archive_extension, get_archive_size, CompressionError
 from .storage import S3Storage, LocalStorage, StorageError
 
 
@@ -163,11 +163,14 @@ class BackupExecutor:
         Raises:
             CompressionError: If archive creation fails
         """
-        # Generate archive filename
+        # Generate archive filename with timestamp
         filename = generate_archive_filename(self.job.name, self.job.compression_format)
 
-        # Create archive in temp directory (without extension, create_archive adds it)
-        archive_base = os.path.join(self.temp_dir, self.job.name)
+        # Strip extension (create_archive adds it back)
+        filename_without_ext = strip_archive_extension(filename)
+
+        # Create archive in temp directory
+        archive_base = os.path.join(self.temp_dir, filename_without_ext)
 
         # Create archive
         archive_path = create_archive(
