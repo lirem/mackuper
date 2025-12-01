@@ -1,0 +1,6 @@
+This is a sample text file for testing backup functionality.
+It contains multiple lines to ensure proper file handling.
+
+Line 1: Test data
+Line 2: More test data
+Line 3: Even more test data
