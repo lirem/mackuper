@@ -128,10 +128,19 @@ def get_statistics():
         BackupHistory.started_at >= thirty_days_ago
     ).count()
 
+    # Calculate success rate
+    completed_backups = successful_backups + failed_backups
+    if completed_backups > 0:
+        success_rate = round((successful_backups / completed_backups) * 100, 1)
+    else:
+        success_rate = 0
+
     return jsonify({
         'total_backups': total_backups,
         'successful_backups': successful_backups,
         'failed_backups': failed_backups,
+        'success_rate': success_rate,
+        'total_size': total_size_bytes,
         'total_size_gb': total_size_gb,
         'backups_last_7_days': backups_last_7_days,
         'backups_last_30_days': backups_last_30_days
