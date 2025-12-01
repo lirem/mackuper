@@ -44,6 +44,7 @@ class BackupExecutor:
         self.temp_dir = None
         self.archive_path = None
         self.logs = []
+        self._log_flush_counter = 0
 
     def execute(self) -> BackupHistory:
         """
@@ -98,11 +99,13 @@ class BackupExecutor:
         self._log("Creating temporary directory")
         self.temp_dir = tempfile.mkdtemp(prefix='mackuper_backup_')
         self._log(f"Temporary directory: {self.temp_dir}")
+        self._flush_logs_to_db()
 
         # Step 2: Acquire source files
         self._log(f"Acquiring source files (type: {self.job.source_type})")
         acquired_paths = self._acquire_sources()
         self._log(f"Acquired {len(acquired_paths)} items")
+        self._flush_logs_to_db()
 
         # Step 3: Create archive
         self._log(f"Creating archive (format: {self.job.compression_format})")
@@ -110,12 +113,14 @@ class BackupExecutor:
         file_size = get_archive_size(self.archive_path)
         self.history_record.file_size_bytes = file_size
         self._log(f"Archive created: {os.path.basename(self.archive_path)} ({file_size / 1024 / 1024:.2f} MB)")
+        self._flush_logs_to_db()
 
         # Step 4: Upload to S3
         self._log("Uploading to S3")
         s3_key = self._upload_to_s3()
         self.history_record.s3_key = s3_key
         self._log(f"Uploaded to S3: {s3_key}")
+        self._flush_logs_to_db()
 
         # Step 5: Store locally (if configured)
         if self.job.retention_local_days is not None:
@@ -256,6 +261,18 @@ class BackupExecutor:
         log_entry = f"[{timestamp}] {message}"
         self.logs.append(log_entry)
         print(log_entry)  # Also print to console for debugging
+
+        # Flush logs every 5 entries
+        self._log_flush_counter += 1
+        if self._log_flush_counter >= 5:
+            self._flush_logs_to_db()
+
+    def _flush_logs_to_db(self):
+        """Flush accumulated logs to database for real-time visibility."""
+        if self.history_record:
+            self.history_record.logs = '\n'.join(self.logs)
+            db.session.commit()
+            self._log_flush_counter = 0
 
 
 def execute_backup_job(job_id: int, allow_disabled: bool = False) -> BackupHistory:

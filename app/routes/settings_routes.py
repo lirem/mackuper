@@ -3,6 +3,7 @@ Settings routes - AWS configuration and user settings management.
 """
 
 import logging
+import sys
 import traceback
 from datetime import datetime
 from flask import Blueprint, jsonify, request, session, current_app
@@ -322,5 +323,6 @@ def get_about():
         'app_name': 'Mackuper',
         'version': '1.0.0',
         'description': 'Docker-based backup solution for AWS S3',
-        'author': 'Mackuper Team'
+        'author': 'Mackuper Team',
+        'python_version': sys.version.split()[0]
     })
