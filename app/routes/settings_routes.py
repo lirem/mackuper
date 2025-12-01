@@ -4,7 +4,8 @@ Settings routes - AWS configuration and user settings management.
 
 import logging
 import traceback
-from flask import Blueprint, jsonify, request, session
+from datetime import datetime
+from flask import Blueprint, jsonify, request, session, current_app
 from flask_login import login_required, current_user
 
 from app import db
@@ -275,6 +276,34 @@ def change_password():
 
     # Hash and save new password
     user.password_hash = hash_password(data['new_password'])
+
+    # Update encrypted password storage
+    try:
+        from app.utils.master_key import get_master_key_manager
+
+        # Re-initialize crypto manager with new password
+        encryption_key = EncryptionKey.query.first()
+        if encryption_key:
+            # Re-initialize crypto manager with new password
+            crypto_manager.initialize(data['new_password'], encryption_key.key_encrypted)
+
+            # Update session password
+            session['user_password'] = data['new_password']
+
+            # Save encrypted password
+            master_key_manager = get_master_key_manager(current_app)
+            encrypted_password = master_key_manager.encrypt_password(data['new_password'])
+            encryption_key.password_encrypted = encrypted_password
+            encryption_key.updated_at = datetime.utcnow()
+
+            logger.info("Encrypted password updated after password change")
+
+    except Exception as e:
+        logger.error(f"Failed to update encrypted password: {e}")
+        # Don't fail the password change, but warn the user
+        db.session.commit()  # Commit password hash change
+        return jsonify({'message': 'Password changed but auto-unlock may not work. Please re-login.'}), 200
+
     db.session.commit()
 
     return jsonify({'message': 'Password changed successfully'})

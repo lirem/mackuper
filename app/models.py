@@ -82,8 +82,10 @@ class EncryptionKey(db.Model):
     __tablename__ = 'encryption_key'
 
     id = db.Column(db.Integer, primary_key=True)
-    key_encrypted = db.Column(db.Text, nullable=False)
+    key_encrypted = db.Column(db.Text, nullable=False)  # Actually stores salt (misleading name)
+    password_encrypted = db.Column(db.Text, nullable=True)  # Encrypted user password for auto-unlock
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True)
 
     def __repr__(self):
-        return f'<EncryptionKey id={self.id}>'
+        return f'<EncryptionKey id={self.id} has_password={self.password_encrypted is not None}>'
