@@ -181,7 +181,34 @@ def generate_archive_filename(job_name: str, compression_format: str) -> str:
         for c in job_name
     )
 
-    return f"{safe_job_name}_{timestamp}.{extension}"
+    return f"{safe_job_name}-{timestamp}.{extension}"
+
+
+def strip_archive_extension(filename: str) -> str:
+    """
+    Strip archive extension from filename.
+
+    Handles multi-part extensions like .tar.gz, .tar.bz2, .tar.xz
+
+    Args:
+        filename: Archive filename with extension
+
+    Returns:
+        Filename without extension
+    """
+    if filename.endswith('.tar.gz'):
+        return filename[:-7]
+    elif filename.endswith('.tar.bz2'):
+        return filename[:-8]
+    elif filename.endswith('.tar.xz'):
+        return filename[:-7]
+    elif filename.endswith('.zip'):
+        return filename[:-4]
+    elif filename.endswith('.tar'):
+        return filename[:-4]
+    else:
+        # Fallback to standard splitext
+        return os.path.splitext(filename)[0]
 
 
 def get_archive_size(archive_path: str) -> int:
