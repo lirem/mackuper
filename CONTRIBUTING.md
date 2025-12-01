@@ -138,9 +138,9 @@ mackuper/
 │   ├── temp/               # Temporary files
 │   └── local_backups/      # Local backup storage
 ├── tests/                   # Test suite (to be implemented)
-├── .claude/                 # Claude Code documentation (gitignored)
-│   ├── plan.md             # Full architecture plan
-│   └── progress.md         # Implementation progress tracker
+├── .claude/                 # Development documentation
+│   ├── CLAUDE.md           # Working rules and guidelines
+│   └── PROJECT_CONTEXT.md  # Codebase reference (keep updated!)
 ├── requirements.txt         # Python dependencies
 ├── docker-compose.yml      # Docker Compose configuration
 ├── run.py                  # Development server entry point
@@ -151,6 +151,21 @@ mackuper/
 ├── CONTRIBUTING.md         # This file
 └── LICENSE                 # Apache License 2.0
 ```
+
+### Maintaining PROJECT_CONTEXT.md
+
+The `.claude/PROJECT_CONTEXT.md` file is a quick reference document for the codebase structure. **When making significant changes, please update this file to keep it current.**
+
+Update `PROJECT_CONTEXT.md` when you modify:
+- **API routes** (`/app/routes/*.py`) → Update "API Endpoint Mapping" section
+- **Database models** (`/app/models.py`) → Update "Database Schema" section
+- **Backup modules** (`/app/backup/*.py`) → Update "Module Responsibility Matrix" and/or "Backup Workflow"
+- **New modules** → Update "Module Responsibility Matrix"
+- **Configuration** (`config.py`) → Update "Key Dependencies" section
+- **Testing patterns** → Update "Testing Patterns" section
+- **Dependencies** (`requirements.txt`) → Update "Key Dependencies" section
+
+Also update the "Last Updated" timestamp at the top of the file.
 
 ## Coding Standards
 
