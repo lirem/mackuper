@@ -7,6 +7,52 @@
 ![Flask](https://img.shields.io/badge/flask-3.0-green.svg)
 ![Docker](https://img.shields.io/badge/docker-ready-blue.svg)
 
+## Table of Contents
+
+- [Features](#features)
+- [Quick Start](#quick-start)
+  - [Using Docker](#using-docker-quickest)
+  - [Using Docker Compose](#using-docker-compose-recommended-for-customization)
+  - [Manual Installation](#manual-installation-development)
+- [Prerequisites](#prerequisites)
+  - [AWS S3 Permissions](#aws-s3-permissions)
+- [Configuration](#configuration)
+  - [Environment Variables](#environment-variables)
+  - [AWS Credentials](#aws-credentials)
+- [Usage](#usage)
+  - [Creating a Backup Job](#creating-a-backup-job)
+  - [Backup Source Types](#backup-source-types)
+  - [Cron Schedule Examples](#cron-schedule-examples)
+- [Architecture](#architecture)
+  - [Technology Stack](#technology-stack)
+  - [Directory Structure](#directory-structure)
+  - [Backup Workflow](#backup-workflow)
+  - [S3 Storage Structure](#s3-storage-structure)
+- [Web Interface](#web-interface)
+- [Logging](#logging)
+- [Troubleshooting](#troubleshooting)
+  - [Setup Wizard Issues](#setup-wizard-issues)
+  - [Backup Job Issues](#backup-job-issues)
+  - [Database Issues](#database-issues)
+  - [Performance Issues](#performance-issues)
+- [Security](#security)
+  - [Best Practices](#best-practices)
+  - [Credential Storage](#credential-storage)
+- [Docker Deployment](#docker-deployment)
+  - [Production Deployment](#production-deployment)
+  - [Volume Management](#volume-management)
+  - [Custom Port](#custom-port)
+- [Development](#development)
+  - [Running Tests](#running-tests)
+  - [Project Structure](#project-structure)
+  - [Contributing](#contributing)
+- [FAQ](#faq)
+- [License](#license)
+- [Support](#support)
+- [Credits](#credits)
+
+---
+
 ## Features
 
 - 🔐 **Secure** - Encrypted AWS credentials, password-protected access, CSRF protection
@@ -70,6 +116,8 @@ docker run -d \
 
 That's it! You're ready to create backup jobs!
 
+---
+
 ### Manual Installation (Development)
 
 1. **Install Python 3.11+:**
@@ -89,6 +137,8 @@ That's it! You're ready to create backup jobs!
 
 4. **Access the application:**
    Open http://localhost:5000 in your browser
+
+---
 
 ## Prerequisites
 
@@ -137,6 +187,8 @@ Your AWS IAM user/role needs the following S3 permissions:
 - `s3:AbortMultipartUpload` and `s3:ListMultipartUploadParts` are required for large file uploads (>100MB)
 - `s3:GetBucketLocation` is needed for S3 connection testing
 
+---
+
 ## Configuration
 
 ### Environment Variables
@@ -171,6 +223,8 @@ AWS credentials are configured through the web interface during setup:
 4. Test the connection
 
 Credentials are encrypted and stored securely in the database.
+
+---
 
 ## Usage
 
@@ -254,6 +308,8 @@ Back up files from a remote server via SSH/SFTP:
 0 0,12 * * *       # Twice daily (midnight and noon)
 ```
 
+---
+
 ## Architecture
 
 ### Technology Stack
@@ -299,6 +355,8 @@ your-bucket/
 │   │       └── backup_20250201_020000.tar.gz
 ```
 
+---
+
 ## Web Interface
 
 ### Dashboard Tab
@@ -322,6 +380,8 @@ your-bucket/
 - **Connection Test**: Verify S3 access
 - **Password Management**: Change admin password
 - **About**: Version and system information
+
+---
 
 ## Logging
 
@@ -347,6 +407,8 @@ tail -f ./data/logs/mackuper.log
 - SSH connections
 - Errors and exceptions with stack traces
 - User actions (login, job changes, etc.)
+
+---
 
 ## Troubleshooting
 
@@ -416,6 +478,8 @@ tail -f ./data/logs/mackuper.log
 - Consider using less compression (e.g., ZIP instead of XZ)
 - Or use "none" compression for pre-compressed data
 
+---
+
 ## Security
 
 ### Best Practices
@@ -446,6 +510,8 @@ tail -f ./data/logs/mackuper.log
 - **SSH Passwords**: Encrypted with Fernet before storage
 - **Master Key**: Derived from user password using PBKDF2-HMAC-SHA256 (480,000 iterations)
 - **Passwords**: Hashed with PBKDF2-SHA256 before storage
+
+---
 
 ## Docker Deployment
 
@@ -507,6 +573,8 @@ docker-compose down
 docker-compose up -d
 ```
 
+---
+
 ## Development
 
 ### Running Tests
@@ -551,6 +619,8 @@ Contributions are welcome! Please:
 4. Add tests
 5. Submit a pull request
 
+---
+
 ## FAQ
 
 **Q: Can I backup to multiple S3 buckets?**
@@ -571,14 +641,20 @@ A: Yes! Click "Run Now" on any job in the Jobs tab to execute immediately.
 **Q: How do I migrate to a new server?**
 A: Copy the `./data` directory to the new server and start Mackuper. All settings, jobs, and history will be preserved.
 
+---
+
 ## License
 
 Apache License 2.0 - see LICENSE file for details.
+
+---
 
 ## Support
 
 - **Issues**: https://github.com/lirem/mackuper/issues
 - **Documentation**: https://github.com/lirem/mackuper/wiki
+
+---
 
 ## Credits
 
