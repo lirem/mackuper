@@ -3,12 +3,13 @@ Backup jobs routes - CRUD operations and job execution.
 """
 
 import json
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, session
 from flask_login import login_required
 
 from app import db
-from app.models import BackupJob, BackupHistory
+from app.models import BackupJob, BackupHistory, EncryptionKey
 from app.scheduler import sync_backup_jobs, trigger_backup_now
+from app.utils.crypto import crypto_manager
 
 
 bp = Blueprint('jobs', __name__, url_prefix='/api/jobs')
@@ -60,6 +61,30 @@ def get_job(job_id):
 
     # Parse source config JSON
     source_config = json.loads(job.source_config)
+
+    # Add password hint for SSH jobs (never return full password)
+    if job.source_type == 'ssh' and job.ssh_password_encrypted:
+        # Re-initialize crypto_manager if needed
+        if not crypto_manager.is_initialized and 'user_password' in session:
+            encryption_key = EncryptionKey.query.first()
+            if encryption_key:
+                crypto_manager.initialize(session['user_password'], encryption_key.key_encrypted)
+
+        if crypto_manager.is_initialized:
+            try:
+                password = crypto_manager.decrypt(job.ssh_password_encrypted)
+                source_config['password_hint'] = '***' + '*' * min(len(password), 12)
+            except Exception:
+                source_config['password_hint'] = '••• configured •••'
+        else:
+            source_config['password_hint'] = '••• configured •••'
+
+    # Handle legacy jobs (plaintext password still in source_config)
+    elif job.source_type == 'ssh' and 'password' in source_config:
+        password = source_config['password']
+        source_config['password_hint'] = '***' + '*' * min(len(password), 12)
+        # Remove plaintext password before returning
+        del source_config['password']
 
     return jsonify({
         'id': job.id,
@@ -124,13 +149,34 @@ def create_job():
     if existing:
         return jsonify({'error': 'Job name already exists'}), 400
 
+    # Extract and encrypt SSH password if present
+    source_config = data['source_config']
+    ssh_password_encrypted = None
+
+    if data['source_type'] == 'ssh' and source_config.get('password'):
+        # Re-initialize crypto_manager if needed
+        if not crypto_manager.is_initialized:
+            encryption_key = EncryptionKey.query.first()
+            if encryption_key and 'user_password' in session:
+                crypto_manager.initialize(session['user_password'], encryption_key.key_encrypted)
+            else:
+                return jsonify({'error': 'Session expired. Please log out and log back in.'}), 401
+
+        # Encrypt password
+        ssh_password_encrypted = crypto_manager.encrypt(source_config['password'])
+
+        # Remove password from source_config before storing
+        source_config = source_config.copy()
+        del source_config['password']
+
     # Create new job
     job = BackupJob(
         name=data['name'],
         description=data.get('description', ''),
         enabled=data.get('enabled', True),
         source_type=data['source_type'],
-        source_config=json.dumps(data['source_config']),
+        source_config=json.dumps(source_config),
+        ssh_password_encrypted=ssh_password_encrypted,
         compression_format=data['compression_format'],
         schedule_cron=data.get('schedule_cron'),
         retention_s3_days=data.get('retention_s3_days'),
@@ -187,7 +233,32 @@ def update_job(job_id):
         job.source_type = data['source_type']
 
     if 'source_config' in data:
-        job.source_config = json.dumps(data['source_config'])
+        source_config = data['source_config']
+
+        # Handle SSH password encryption
+        if (job.source_type == 'ssh' or data.get('source_type') == 'ssh'):
+            password = source_config.get('password')
+
+            if password:
+                # Re-initialize crypto_manager if needed
+                if not crypto_manager.is_initialized:
+                    encryption_key = EncryptionKey.query.first()
+                    if encryption_key and 'user_password' in session:
+                        crypto_manager.initialize(session['user_password'], encryption_key.key_encrypted)
+                    else:
+                        return jsonify({'error': 'Session expired. Please log out and log back in.'}), 401
+
+                # Encrypt new password
+                job.ssh_password_encrypted = crypto_manager.encrypt(password)
+
+                # Remove password from source_config before storing
+                source_config = source_config.copy()
+                del source_config['password']
+            elif password is None and 'password' not in source_config:
+                # Password explicitly removed (switching to private key only)
+                job.ssh_password_encrypted = None
+
+        job.source_config = json.dumps(source_config)
 
     if 'compression_format' in data:
         valid_formats = ['zip', 'tar.gz', 'tar.bz2', 'tar.xz', 'none']
