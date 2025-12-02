@@ -44,6 +44,14 @@ def login():
         if encryption_key:
             crypto_manager.initialize(password, encryption_key.key_encrypted)
 
+        # Trigger deferred SSH password migration (for jobs that couldn't be migrated during startup)
+        try:
+            from app.migrations import _migrate_ssh_passwords
+            _migrate_ssh_passwords()
+        except Exception as e:
+            current_app.logger.warning(f"Failed to migrate SSH passwords on login: {e}")
+            # Don't fail login if migration fails
+
         # Save encrypted password for auto-unlock on startup
         try:
             from app.utils.master_key import get_master_key_manager

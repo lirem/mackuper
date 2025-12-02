@@ -144,6 +144,32 @@ class BackupExecutor:
         # Parse source config
         source_config = json.loads(self.job.source_config)
 
+        # For SSH jobs, decrypt password and inject into config
+        if self.job.source_type == 'ssh':
+            # Check if password is encrypted in new column
+            if self.job.ssh_password_encrypted:
+                # Decrypt password
+                if not crypto_manager.is_initialized:
+                    raise SourceError(
+                        "Crypto manager not initialized. Cannot decrypt SSH password. "
+                        "This usually means the application needs to be restarted or user needs to log in."
+                    )
+
+                try:
+                    decrypted_password = crypto_manager.decrypt(self.job.ssh_password_encrypted)
+                    source_config['password'] = decrypted_password
+                    self._log("SSH password decrypted successfully")
+                except Exception as e:
+                    raise SourceError(f"Failed to decrypt SSH password: {e}")
+
+            # Legacy support: password might still be in source_config (not yet migrated)
+            elif 'password' in source_config:
+                self._log("Using legacy plaintext SSH password (migration pending)")
+
+            # No password in either location - using private key only
+            else:
+                self._log("No SSH password found - using private key authentication")
+
         # Create appropriate source handler
         source = create_source(self.job.source_type, source_config)
 

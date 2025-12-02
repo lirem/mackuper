@@ -41,6 +41,7 @@ class BackupJob(db.Model):
     enabled = db.Column(db.Boolean, default=True, nullable=False)
     source_type = db.Column(db.String(20), nullable=False)  # 'local' or 'ssh'
     source_config = db.Column(db.Text, nullable=False)  # JSON string
+    ssh_password_encrypted = db.Column(db.Text, nullable=True)  # Encrypted SSH password (only for SSH jobs with passwords)
     compression_format = db.Column(db.String(20), nullable=False)  # zip, tar.gz, tar.bz2, tar.xz, none
     schedule_cron = db.Column(db.String(100))  # Cron expression
     retention_s3_days = db.Column(db.Integer)  # Days to keep in S3
