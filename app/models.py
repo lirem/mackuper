@@ -62,7 +62,7 @@ class BackupHistory(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     job_id = db.Column(db.Integer, db.ForeignKey('backup_jobs.id'), nullable=False)
-    status = db.Column(db.String(20), nullable=False)  # running, success, failed
+    status = db.Column(db.String(20), nullable=False)  # running, success, failed, cancelling, cancelled
     started_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     completed_at = db.Column(db.DateTime)
     file_size_bytes = db.Column(db.BigInteger)
@@ -70,6 +70,7 @@ class BackupHistory(db.Model):
     local_path = db.Column(db.String(500))
     error_message = db.Column(db.Text)
     logs = db.Column(db.Text)  # Detailed execution logs
+    cancellation_requested = db.Column(db.Boolean, default=False, nullable=False)  # User requested cancellation
 
     # Relationship
     job = db.relationship('BackupJob', back_populates='history')

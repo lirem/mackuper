@@ -8,7 +8,7 @@ Workflow:
 4. Upload to S3
 5. Store locally (if configured)
 6. Cleanup temporary files
-7. Update BackupHistory (status: success/failed)
+7. Update BackupHistory (status: success/failed/cancelled)
 """
 
 import os
@@ -25,6 +25,11 @@ from app.utils.crypto import crypto_manager
 from .sources import create_source, SourceError
 from .compression import create_archive, generate_archive_filename, strip_archive_extension, get_archive_size, CompressionError
 from .storage import S3Storage, LocalStorage, StorageError
+
+
+class BackupCancelledException(Exception):
+    """Raised when backup is cancelled by user."""
+    pass
 
 
 class BackupExecutor:
@@ -76,6 +81,13 @@ class BackupExecutor:
             self.history_record.completed_at = datetime.utcnow()
             self._log(f"Backup completed successfully")
 
+        except BackupCancelledException:
+            # Handle cancellation
+            self.history_record.status = 'cancelled'
+            self.history_record.completed_at = datetime.utcnow()
+            self._log("Backup cancelled by user")
+            self._cleanup_cancelled()
+
         except Exception as e:
             # Mark as failed
             self.history_record.status = 'failed'
@@ -106,6 +118,7 @@ class BackupExecutor:
         acquired_paths = self._acquire_sources()
         self._log(f"Acquired {len(acquired_paths)} items")
         self._flush_logs_to_db()
+        self._check_cancellation()  # Checkpoint 1
 
         # Step 3: Create archive
         self._log(f"Creating archive (format: {self.job.compression_format})")
@@ -114,6 +127,7 @@ class BackupExecutor:
         self.history_record.file_size_bytes = file_size
         self._log(f"Archive created: {os.path.basename(self.archive_path)} ({file_size / 1024 / 1024:.2f} MB)")
         self._flush_logs_to_db()
+        self._check_cancellation()  # Checkpoint 2
 
         # Step 4: Upload to S3
         self._log("Uploading to S3")
@@ -121,6 +135,7 @@ class BackupExecutor:
         self.history_record.s3_key = s3_key
         self._log(f"Uploaded to S3: {s3_key}")
         self._flush_logs_to_db()
+        self._check_cancellation()  # Checkpoint 3
 
         # Step 5: Store locally (if configured)
         if self.job.retention_local_days is not None:
@@ -242,8 +257,8 @@ class BackupExecutor:
             region=aws_settings.region
         )
 
-        # Upload archive
-        s3_key = s3_storage.upload(self.archive_path, self.job.name)
+        # Upload archive with cancellation check for large files
+        s3_key = s3_storage.upload(self.archive_path, self.job.name, cancellation_check=self._check_cancellation)
         return s3_key
 
     def _store_locally(self) -> str:
@@ -266,6 +281,42 @@ class BackupExecutor:
         # Store archive
         local_path = local_storage.store(self.archive_path, self.job.name)
         return local_path
+
+    def _check_cancellation(self):
+        """
+        Check if cancellation was requested and raise exception if so.
+
+        Raises:
+            BackupCancelledException: If user requested cancellation
+        """
+        # Refresh history record from database to get latest cancellation status
+        db.session.refresh(self.history_record)
+
+        if self.history_record.cancellation_requested:
+            self._log("Cancellation detected at checkpoint")
+            raise BackupCancelledException("Backup cancelled by user")
+
+    def _cleanup_cancelled(self):
+        """
+        Additional cleanup for cancelled backups.
+        Removes partial files and clears storage paths.
+        """
+        from app.config import Config
+
+        # Remove partial local backup if it exists
+        if self.history_record.local_path:
+            try:
+                local_full_path = os.path.join(Config.LOCAL_BACKUP_DIR, self.history_record.local_path)
+                if os.path.exists(local_full_path):
+                    os.remove(local_full_path)
+                    self._log(f"Removed partial local backup: {local_full_path}")
+            except Exception as e:
+                self._log(f"Warning: Failed to remove partial local backup: {e}")
+
+        # Clear storage paths since backup didn't complete
+        self.history_record.s3_key = None
+        self.history_record.local_path = None
+        self.history_record.file_size_bytes = None
 
     def _cleanup(self):
         """Remove temporary directory and files."""

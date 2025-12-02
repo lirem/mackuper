@@ -54,6 +54,8 @@ async function renderHistory() {
                                 <option value="success" ${historyState.filters.status === 'success' ? 'selected' : ''}>Success</option>
                                 <option value="failed" ${historyState.filters.status === 'failed' ? 'selected' : ''}>Failed</option>
                                 <option value="running" ${historyState.filters.status === 'running' ? 'selected' : ''}>Running</option>
+                                <option value="cancelling" ${historyState.filters.status === 'cancelling' ? 'selected' : ''}>Cancelling</option>
+                                <option value="cancelled" ${historyState.filters.status === 'cancelled' ? 'selected' : ''}>Cancelled</option>
                             </select>
                         </div>
 
@@ -158,9 +160,19 @@ function renderHistoryRow(item) {
             <td class="text-sm text-gray-600">${duration ? duration + 's' : '-'}</td>
             <td class="text-sm text-gray-600">${item.file_size_bytes ? formatBytes(item.file_size_bytes) : '-'}</td>
             <td>
-                <button onclick="viewLogs(${item.id})" class="btn-secondary btn-sm">
-                    View Logs
-                </button>
+                <div class="flex gap-2">
+                    ${item.status === 'running' || item.status === 'cancelling' ? `
+                        <button
+                            onclick="cancelBackup(${item.id})"
+                            class="btn-secondary btn-sm"
+                            ${item.status === 'cancelling' ? 'disabled' : ''}>
+                            ${item.status === 'cancelling' ? 'Cancelling...' : 'Cancel'}
+                        </button>
+                    ` : ''}
+                    <button onclick="viewLogs(${item.id})" class="btn-secondary btn-sm">
+                        View Logs
+                    </button>
+                </div>
             </td>
         </tr>
     `;
@@ -264,6 +276,30 @@ async function viewLogs(historyId) {
 
 function closeLogsModal() {
     document.getElementById('logsModal').classList.add('hidden');
+}
+
+async function cancelBackup(historyId) {
+    if (!confirm('Cancel this running backup? Temporary files will be cleaned up.')) return;
+
+    try {
+        const response = await fetch(`/api/history/${historyId}/cancel`, {
+            method: 'POST'
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+            throw new Error(result.error || 'Failed to cancel backup');
+        }
+
+        const app = Alpine.$data(document.querySelector('[x-data]'));
+        app.showToast(result.message || 'Cancellation requested', 'warning');
+
+        // Refresh history to show updated status
+        setTimeout(() => app.refreshHistory(), 1000);
+    } catch (error) {
+        alert('Failed to cancel backup: ' + error.message);
+    }
 }
 
 async function showCleanupDialog() {

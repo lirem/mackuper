@@ -47,7 +47,7 @@ def list_history():
 
     # Apply filters
     if status_filter:
-        if status_filter not in ['running', 'success', 'failed']:
+        if status_filter not in ['running', 'success', 'failed', 'cancelling', 'cancelled']:
             return jsonify({'error': 'Invalid status filter'}), 400
         query = query.filter(BackupHistory.status == status_filter)
 
@@ -202,6 +202,44 @@ def get_history_summary():
         'failed': failed,
         'success_rate': success_rate,
         'most_recent': recent_info
+    })
+
+
+@bp.route('/<int:history_id>/cancel', methods=['POST'])
+@login_required
+def cancel_backup(history_id):
+    """
+    Request cancellation of a running backup.
+
+    Args:
+        history_id: Backup history record ID
+
+    Returns:
+        JSON with cancellation status message
+    """
+    record = BackupHistory.query.get_or_404(history_id)
+
+    # Verify job is actually running
+    if record.status != 'running':
+        return jsonify({
+            'error': f'Cannot cancel backup with status: {record.status}'
+        }), 400
+
+    # Check if already cancelling
+    if record.cancellation_requested:
+        return jsonify({
+            'message': 'Cancellation already requested',
+            'status': 'cancelling'
+        })
+
+    # Set cancellation flag and transitional status
+    record.cancellation_requested = True
+    record.status = 'cancelling'
+    db.session.commit()
+
+    return jsonify({
+        'message': 'Cancellation requested. The backup will stop at the next safe checkpoint.',
+        'status': 'cancelling'
     })
 
 
