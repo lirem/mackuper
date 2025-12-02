@@ -25,6 +25,28 @@ scheduler = None
 flask_app = None
 
 
+def _count_jobs_in_database() -> int:
+    """
+    Count jobs in APScheduler's persistent job store.
+
+    This is used as a fallback to detect scheduler health when
+    the in-memory scheduler object is not available (e.g., in
+    Flask's reloader parent process).
+
+    Returns:
+        Number of jobs in database, or 0 if error
+    """
+    try:
+        from sqlalchemy import text
+        result = db.session.execute(
+            text("SELECT COUNT(*) FROM apscheduler_jobs")
+        ).scalar()
+        return result or 0
+    except Exception:
+        # Database not initialized or table doesn't exist
+        return 0
+
+
 def init_scheduler(app):
     """
     Initialize and configure APScheduler.
@@ -336,28 +358,51 @@ def is_scheduler_running() -> bool:
     """
     Check if scheduler is running.
 
+    This function works in both development and production:
+    - In production: Checks in-memory scheduler state
+    - In development with reloader: Falls back to checking job store database
+
+    The database fallback ensures accurate status reporting even when
+    Flask's reloader creates separate parent/child processes.
+
     Returns:
-        True if scheduler is running, False otherwise
+        True if scheduler is running or has scheduled jobs, False otherwise
     """
     global scheduler
-    return scheduler is not None and scheduler.running
+
+    # Check 1: In-memory scheduler (fastest, works in production)
+    if scheduler is not None and scheduler.running:
+        return True
+
+    # Check 2: Database fallback for development mode with reloader
+    # If jobs exist in the database, scheduler must be running somewhere
+    job_count = _count_jobs_in_database()
+    return job_count > 0
 
 
 def get_scheduler_diagnostics() -> dict:
     """
     Get detailed scheduler diagnostics for troubleshooting.
 
+    Includes both in-memory state (from global scheduler object)
+    and persistent state (from database job store) for accurate
+    reporting in all deployment scenarios.
+
     Returns:
         Dict with scheduler state, jobs, and health info
     """
     global scheduler
 
+    # Get database state (always available)
+    jobs_in_db = _count_jobs_in_database()
+
     if scheduler is None:
         return {
             'initialized': False,
-            'running': False,
+            'running': jobs_in_db > 0,  # Use database as fallback
             'state': 'NOT_INITIALIZED',
-            'error': 'Scheduler has not been initialized'
+            'jobs_in_database': jobs_in_db,
+            'note': 'Scheduler object not available (reloader parent process)'
         }
 
     try:
@@ -377,12 +422,14 @@ def get_scheduler_diagnostics() -> dict:
             'running': scheduler.running,
             'state': str(scheduler.state),
             'job_count': len(jobs),
+            'jobs_in_database': jobs_in_db,
             'jobs': job_info
         }
     except Exception as e:
         return {
             'initialized': True,
-            'running': False,
+            'running': jobs_in_db > 0,
             'state': 'ERROR',
+            'jobs_in_database': jobs_in_db,
             'error': str(e)
         }

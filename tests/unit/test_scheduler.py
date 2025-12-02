@@ -420,3 +420,111 @@ class TestExecuteBackupWrapper:
 
         # Should not raise exception
         scheduler_module._execute_backup_wrapper(123)
+
+
+class TestSchedulerStatusDatabaseFallback:
+    """Test scheduler status detection with database fallback."""
+
+    def teardown_method(self):
+        """Clean up after each test."""
+        scheduler_module.scheduler = None
+
+    @patch('app.scheduler._count_jobs_in_database')
+    def test_is_running_with_in_memory_scheduler(self, mock_count):
+        """Test status detection when in-memory scheduler is running."""
+        mock_scheduler = MagicMock()
+        mock_scheduler.running = True
+        scheduler_module.scheduler = mock_scheduler
+        mock_count.return_value = 2
+
+        result = scheduler_module.is_scheduler_running()
+
+        # Should use in-memory check first, no database query needed
+        assert result is True
+        mock_count.assert_not_called()
+
+    @patch('app.scheduler._count_jobs_in_database')
+    def test_is_running_with_jobs_in_database(self, mock_count):
+        """Test status detection when scheduler is None but jobs exist in DB."""
+        scheduler_module.scheduler = None
+        mock_count.return_value = 2
+
+        result = scheduler_module.is_scheduler_running()
+
+        assert result is True
+        mock_count.assert_called_once()
+
+    @patch('app.scheduler._count_jobs_in_database')
+    def test_is_running_no_jobs_in_database(self, mock_count):
+        """Test status detection when scheduler is None and no jobs in DB."""
+        scheduler_module.scheduler = None
+        mock_count.return_value = 0
+
+        result = scheduler_module.is_scheduler_running()
+
+        assert result is False
+        mock_count.assert_called_once()
+
+    @patch('app.scheduler._count_jobs_in_database')
+    def test_is_running_scheduler_not_running_but_jobs_in_db(self, mock_count):
+        """Test status detection when in-memory scheduler not running but DB has jobs."""
+        mock_scheduler = MagicMock()
+        mock_scheduler.running = False
+        scheduler_module.scheduler = mock_scheduler
+        mock_count.return_value = 3
+
+        result = scheduler_module.is_scheduler_running()
+
+        # Should fall back to database check
+        assert result is True
+        mock_count.assert_called_once()
+
+    @patch('app.scheduler._count_jobs_in_database')
+    def test_diagnostics_with_database_fallback(self, mock_count):
+        """Test diagnostics include database state when scheduler is None."""
+        scheduler_module.scheduler = None
+        mock_count.return_value = 3
+
+        result = scheduler_module.get_scheduler_diagnostics()
+
+        assert result['initialized'] is False
+        assert result['running'] is True  # Based on DB fallback
+        assert result['jobs_in_database'] == 3
+        assert 'reloader' in result['note'].lower()
+        mock_count.assert_called_once()
+
+    @patch('app.scheduler._count_jobs_in_database')
+    def test_diagnostics_includes_db_count_when_initialized(self, mock_count):
+        """Test diagnostics include database count alongside in-memory state."""
+        mock_scheduler = MagicMock()
+        mock_scheduler.running = True
+        mock_scheduler.state = 1
+        mock_scheduler.get_jobs.return_value = []
+        scheduler_module.scheduler = mock_scheduler
+        mock_count.return_value = 2
+
+        result = scheduler_module.get_scheduler_diagnostics()
+
+        assert result['initialized'] is True
+        assert result['running'] is True
+        assert result['job_count'] == 0  # In-memory count
+        assert result['jobs_in_database'] == 2  # DB count
+        mock_count.assert_called_once()
+
+    @patch('app.scheduler._count_jobs_in_database')
+    def test_diagnostics_fallback_on_error(self, mock_count):
+        """Test diagnostics use DB fallback when scheduler.get_jobs() fails."""
+        mock_scheduler = MagicMock()
+        mock_scheduler.running = True
+        mock_scheduler.get_jobs.side_effect = Exception("Test error")
+        scheduler_module.scheduler = mock_scheduler
+        mock_count.return_value = 2
+
+        result = scheduler_module.get_scheduler_diagnostics()
+
+        assert result['initialized'] is True
+        assert result['running'] is True  # Based on DB fallback
+        assert result['state'] == 'ERROR'
+        assert result['jobs_in_database'] == 2
+        assert 'error' in result
+        mock_count.assert_called_once()

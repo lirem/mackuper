@@ -26,7 +26,7 @@ def get_overview():
         - total_jobs: Total number of backup jobs
         - active_jobs: Number of enabled backup jobs
         - last_backup: Most recent backup info
-        - scheduler_status: Scheduler running status
+        - scheduler_running: Boolean indicating if scheduler is running
     """
     # Count total and active jobs
     total_jobs = BackupJob.query.count()
@@ -53,7 +53,7 @@ def get_overview():
         'total_jobs': total_jobs,
         'active_jobs': active_jobs,
         'last_backup': last_backup_info,
-        'scheduler_status': 'running' if scheduler_running else 'stopped'
+        'scheduler_running': scheduler_running
     })
 
 
