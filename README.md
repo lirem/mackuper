@@ -7,6 +7,10 @@
 ![Flask](https://img.shields.io/badge/flask-3.0-green.svg)
 ![Docker](https://img.shields.io/badge/docker-ready-blue.svg)
 
+![Mackuper Dashboard](docs/images/dashboard.png)
+
+*More screenshots: [Jobs](docs/images/jobs.png) | [History](docs/images/history.png) | [Settings](docs/images/settings.png)*
+
 ## Table of Contents
 
 - [Features](#features)
