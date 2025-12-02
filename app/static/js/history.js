@@ -15,7 +15,21 @@ let historyState = {
     selectedLog: null
 };
 
+// Helper to get job name by ID
+function getJobName(jobId, jobs) {
+    const job = jobs.find(j => j.id === jobId);
+    return job ? job.name : `Job #${jobId}`;
+}
+
+// Helper to calculate duration
+function calculateDuration(startedAt, completedAt) {
+    if (!completedAt || !startedAt) return null;
+    return Math.round((new Date(completedAt) - new Date(startedAt)) / 1000);
+}
+
 async function renderHistory() {
+    const app = Alpine.$data(document.querySelector('[x-data]'));
+
     try {
         // Fetch jobs for filter dropdown
         if (historyState.jobs.length === 0) {
@@ -33,11 +47,52 @@ async function renderHistory() {
         const response = await fetch(`/api/history?${params.toString()}`).then(r => r.json());
         historyState.history = response.records || [];
 
+        // Update app data - Alpine will handle DOM updates
+        app.historyData = {
+            records: historyState.history,
+            jobs: historyState.jobs,
+            filters: historyState.filters,
+            pagination: historyState.pagination
+        };
+    } catch (error) {
+        console.error('History render error:', error);
+        app.showToast('Failed to load history', 'error');
+    }
+}
+
+// Keep this for reference but it's now unused - will be deleted after confirming new approach works
+async function renderHistoryOLD() {
+    try {
+        // Fetch jobs for filter dropdown
+        if (historyState.jobs.length === 0) {
+            historyState.jobs = await fetch('/api/jobs').then(r => r.json());
+        }
+
+        // Fetch history with filters
+        const params = new URLSearchParams();
+        if (historyState.filters.status) params.append('status', historyState.filters.status);
+        if (historyState.filters.job_id) params.append('job_id', historyState.filters.job_id);
+        if (historyState.filters.days) params.append('days', historyState.filters.days);
+        params.append('page', historyState.pagination.page);
+        params.append('limit', historyState.pagination.limit);
+
+        const response = await fetch(`/api/history?${params.toString()}`).then(r => r.json());
+        historyState.history = response.records || [];
+
+        // Get app instance for badge display
+        const app = Alpine.$data(document.querySelector('[x-data]'));
+
         return `
             <div class="space-y-6">
                 <!-- Header -->
                 <div class="flex justify-between items-center">
-                    <h1 class="text-2xl font-bold text-gray-900">Backup History</h1>
+                    <div>
+                        <h1 class="text-2xl font-bold text-gray-900">Backup History</h1>
+                        <div class="flex items-center gap-2 text-sm text-gray-500 mt-1">
+                            <div class="w-2 h-2 rounded-full bg-green-500 ${app.isRefreshing ? '' : 'hidden'}"></div>
+                            <span>Updated ${formatRelativeTime(app.lastHistoryRefresh)}</span>
+                        </div>
+                    </div>
                     <button onclick="showCleanupDialog()" class="btn-secondary btn-sm">
                         Cleanup Old Records
                     </button>
@@ -120,13 +175,6 @@ async function renderHistory() {
                         </div>
                     </div>
                 `}
-
-                <!-- Logs Modal -->
-                <div id="logsModal" class="modal-overlay hidden">
-                    <div class="modal-content max-w-4xl">
-                        <div id="logsModalContent"></div>
-                    </div>
-                </div>
             </div>
         `;
     } catch (error) {
@@ -200,16 +248,16 @@ function resetFilters() {
 
 async function viewLogs(historyId) {
     try {
+        const app = Alpine.$data(document.querySelector('[x-data]'));
+
         const response = await fetch(`/api/history/${historyId}`);
         const data = await response.json();
 
         const job = historyState.jobs.find(j => j.id === data.job_id);
         const jobName = job ? job.name : `Job #${data.job_id}`;
 
-        const modal = document.getElementById('logsModal');
-        const content = document.getElementById('logsModalContent');
-
-        content.innerHTML = `
+        // Update modal content in persistent modal
+        app.historyModalContent = `
             <div class="flex justify-between items-start mb-4">
                 <div>
                     <h2 class="text-xl font-bold">${escapeHtml(jobName)} - Backup Logs</h2>
@@ -268,14 +316,16 @@ async function viewLogs(historyId) {
             </div>
         `;
 
-        modal.classList.remove('hidden');
+        // Open persistent modal
+        app.historyModalOpen = true;
     } catch (error) {
         alert('Failed to load logs: ' + error.message);
     }
 }
 
 function closeLogsModal() {
-    document.getElementById('logsModal').classList.add('hidden');
+    const app = Alpine.$data(document.querySelector('[x-data]'));
+    app.historyModalOpen = false;
 }
 
 async function cancelBackup(historyId) {
@@ -331,10 +381,3 @@ async function showCleanupDialog() {
         alert('Cleanup failed: ' + error.message);
     }
 }
-
-// Close modal on background click
-document.addEventListener('click', (e) => {
-    if (e.target.id === 'logsModal') {
-        closeLogsModal();
-    }
-});

@@ -10,11 +10,41 @@ function mackuperApp() {
             type: 'info' // success, error, info
         },
 
-        // Component HTML storage
-        dashboardHtml: '',
+        // Component HTML storage (jobs and settings still use HTML string approach)
         jobsHtml: '',
-        historyHtml: '',
         settingsHtml: '',
+
+        // Component data storage (data-driven approach)
+        dashboardData: {
+            overview: {
+                total_jobs: 0,
+                active_jobs: 0,
+                last_backup_time: null,
+                last_backup_status: null,
+                scheduler_running: false
+            },
+            recentActivity: [],
+            statistics: {
+                total_backups: 0,
+                success_rate: 0,
+                total_size: 0
+            }
+        },
+        historyData: {
+            records: [],
+            jobs: [],
+            filters: { status: '', job_id: '', days: 7 },
+            pagination: { page: 1, limit: 20, total: 0, pages: 0 }
+        },
+
+        // Modal state
+        historyModalOpen: false,
+        historyModalContent: '',
+
+        // Refresh timestamps
+        lastDashboardRefresh: Date.now(),
+        lastHistoryRefresh: Date.now(),
+        isRefreshing: false,
 
         // Initialization
         async init() {
@@ -70,12 +100,11 @@ function mackuperApp() {
 
         // Load component content
         async loadDashboard() {
-            this.dashboardHtml = '<div class="text-center py-8 text-gray-500">Loading dashboard...</div>';
             try {
-                this.dashboardHtml = await renderDashboard();
+                await renderDashboard();
             } catch (error) {
-                this.dashboardHtml = '<div class="text-center py-8 text-red-500">Failed to load dashboard</div>';
                 console.error('Dashboard load error:', error);
+                this.showToast('Failed to load dashboard', 'error');
             }
         },
 
@@ -90,12 +119,11 @@ function mackuperApp() {
         },
 
         async loadHistory() {
-            this.historyHtml = '<div class="text-center py-8 text-gray-500">Loading history...</div>';
             try {
-                this.historyHtml = await renderHistory();
+                await renderHistory();
             } catch (error) {
-                this.historyHtml = '<div class="text-center py-8 text-red-500">Failed to load history</div>';
                 console.error('History load error:', error);
+                this.showToast('Failed to load history', 'error');
             }
         },
 
@@ -111,7 +139,10 @@ function mackuperApp() {
 
         // Refresh methods
         async refreshDashboard() {
+            this.isRefreshing = true;
             await this.loadDashboard();
+            this.lastDashboardRefresh = Date.now();
+            this.isRefreshing = false;
         },
 
         async refreshJobs() {
@@ -119,7 +150,10 @@ function mackuperApp() {
         },
 
         async refreshHistory() {
+            this.isRefreshing = true;
             await this.loadHistory();
+            this.lastHistoryRefresh = Date.now();
+            this.isRefreshing = false;
         },
 
         async refreshSettings() {

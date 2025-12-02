@@ -1,5 +1,7 @@
 // Dashboard component
 async function renderDashboard() {
+    const app = Alpine.$data(document.querySelector('[x-data]'));
+
     try {
         // Fetch all dashboard data
         const [overview, recentActivity, statistics] = await Promise.all([
@@ -8,8 +10,39 @@ async function renderDashboard() {
             fetch('/api/dashboard/statistics').then(r => r.json())
         ]);
 
+        // Update app data - Alpine will handle DOM updates
+        app.dashboardData = {
+            overview,
+            recentActivity,
+            statistics
+        };
+    } catch (error) {
+        console.error('Dashboard render error:', error);
+        app.showToast('Failed to load dashboard data', 'error');
+    }
+}
+
+// Keep this for reference but it's now unused - will be deleted after confirming new approach works
+async function renderDashboardOLD() {
+    try {
+        // Fetch all dashboard data
+        const [overview, recentActivity, statistics] = await Promise.all([
+            fetch('/api/dashboard/overview').then(r => r.json()),
+            fetch('/api/dashboard/recent-activity').then(r => r.json()),
+            fetch('/api/dashboard/statistics').then(r => r.json())
+        ]);
+
+        // Get app instance for badge display
+        const app = Alpine.$data(document.querySelector('[x-data]'));
+
         return `
             <div class="space-y-6">
+                <!-- Update Badge -->
+                <div class="flex items-center gap-2 text-sm text-gray-500">
+                    <div class="w-2 h-2 rounded-full bg-green-500 ${app.isRefreshing ? '' : 'hidden'}"></div>
+                    <span>Updated ${formatRelativeTime(app.lastDashboardRefresh)}</span>
+                </div>
+
                 <!-- Overview Stats Cards -->
                 <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
                     <div class="stat-card">
