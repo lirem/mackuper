@@ -97,6 +97,22 @@ def run_migrations(app, inspector=None):
                 logger.error(f"Failed to add ssh_password_encrypted column: {e}")
                 db.session.rollback()
 
+    # Migration 3: Add cancellation_requested column to backup_history table
+    if 'backup_history' in inspector.get_table_names():
+        columns = [col['name'] for col in inspector.get_columns('backup_history')]
+
+        if 'cancellation_requested' not in columns:
+            logger.info("Running migration: Adding cancellation_requested column to backup_history table")
+            try:
+                db.session.execute(text(
+                    "ALTER TABLE backup_history ADD COLUMN cancellation_requested BOOLEAN NOT NULL DEFAULT 0"
+                ))
+                db.session.commit()
+                logger.info("Successfully added cancellation_requested column")
+            except Exception as e:
+                logger.error(f"Failed to add cancellation_requested column: {e}")
+                db.session.rollback()
+
 
 def _migrate_ssh_passwords():
     """

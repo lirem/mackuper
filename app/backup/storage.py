@@ -51,13 +51,14 @@ class S3Storage:
         except Exception as e:
             raise StorageError(f"Failed to initialize S3 client: {e}")
 
-    def upload(self, local_path: str, job_name: str) -> str:
+    def upload(self, local_path: str, job_name: str, cancellation_check: Optional[callable] = None) -> str:
         """
         Upload archive to S3.
 
         Args:
             local_path: Path to local archive file
             job_name: Name of the backup job (used for S3 key structure)
+            cancellation_check: Optional function to call periodically to check if operation should be cancelled
 
         Returns:
             S3 key of uploaded file
@@ -79,8 +80,11 @@ class S3Storage:
 
             # Use multipart upload for files larger than 100MB
             if file_size > 100 * 1024 * 1024:  # 100MB
-                self._multipart_upload(local_path, s3_key, file_size)
+                self._multipart_upload(local_path, s3_key, file_size, cancellation_check)
             else:
+                # Check for cancellation before simple upload
+                if cancellation_check:
+                    cancellation_check()
                 self._simple_upload(local_path, s3_key)
 
             return s3_key
@@ -108,14 +112,15 @@ class S3Storage:
                 Body=f
             )
 
-    def _multipart_upload(self, local_path: str, s3_key: str, file_size: int):
+    def _multipart_upload(self, local_path: str, s3_key: str, file_size: int, cancellation_check: Optional[callable] = None):
         """
-        Upload large file using multipart upload.
+        Upload large file using multipart upload with cancellation support.
 
         Args:
             local_path: Path to local file
             s3_key: S3 object key
             file_size: Size of file in bytes
+            cancellation_check: Optional function to call between chunks to check for cancellation
         """
         # 10MB chunks
         chunk_size = 10 * 1024 * 1024
@@ -134,6 +139,10 @@ class S3Storage:
                 part_number = 1
 
                 while True:
+                    # Check for cancellation before each chunk
+                    if cancellation_check:
+                        cancellation_check()
+
                     data = f.read(chunk_size)
                     if not data:
                         break
@@ -163,7 +172,7 @@ class S3Storage:
             )
 
         except Exception as e:
-            # Abort multipart upload on error
+            # Abort multipart upload on error or cancellation
             try:
                 self.s3_client.abort_multipart_upload(
                     Bucket=self.bucket_name,

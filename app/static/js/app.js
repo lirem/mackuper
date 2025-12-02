@@ -212,6 +212,10 @@ function getStatusBadgeClass(status) {
             return 'badge-error';
         case 'running':
             return 'badge-info';
+        case 'cancelling':
+            return 'badge-warning';
+        case 'cancelled':
+            return 'badge-gray';
         default:
             return 'badge-gray';
     }

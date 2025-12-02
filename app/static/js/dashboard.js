@@ -77,6 +77,7 @@ async function renderDashboard() {
                                         <th>Started</th>
                                         <th>Duration</th>
                                         <th>Size</th>
+                                        <th>Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -95,6 +96,16 @@ async function renderDashboard() {
                                                 <td class="text-gray-600">${formatRelativeTime(item.started_at)}</td>
                                                 <td class="text-gray-600">${duration ? duration + 's' : '-'}</td>
                                                 <td class="text-gray-600">${item.file_size_bytes ? formatBytes(item.file_size_bytes) : '-'}</td>
+                                                <td>
+                                                    ${item.status === 'running' || item.status === 'cancelling' ? `
+                                                        <button
+                                                            onclick="cancelBackupFromDashboard(${item.id})"
+                                                            class="btn-secondary btn-sm"
+                                                            ${item.status === 'cancelling' ? 'disabled' : ''}>
+                                                            ${item.status === 'cancelling' ? 'Cancelling...' : 'Cancel'}
+                                                        </button>
+                                                    ` : '-'}
+                                                </td>
                                             </tr>
                                         `;
                                     }).join('')}
@@ -127,6 +138,30 @@ async function renderDashboard() {
                 Failed to load dashboard data. Please refresh the page.
             </div>
         `;
+    }
+}
+
+async function cancelBackupFromDashboard(historyId) {
+    if (!confirm('Cancel this running backup? Temporary files will be cleaned up.')) return;
+
+    try {
+        const response = await fetch(`/api/history/${historyId}/cancel`, {
+            method: 'POST'
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+            throw new Error(result.error || 'Failed to cancel backup');
+        }
+
+        const app = Alpine.$data(document.querySelector('[x-data]'));
+        app.showToast(result.message || 'Cancellation requested', 'warning');
+
+        // Refresh dashboard to show updated status
+        setTimeout(() => app.refreshDashboard(), 1000);
+    } catch (error) {
+        alert('Failed to cancel backup: ' + error.message);
     }
 }
 
