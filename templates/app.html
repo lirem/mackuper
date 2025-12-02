@@ -80,16 +80,261 @@
         <!-- Tab Content -->
         <div class="tab-content">
             <!-- Dashboard Tab -->
-            <div x-show="currentTab === 'dashboard'" x-html="dashboardHtml"></div>
+            <div x-show="currentTab === 'dashboard'" class="space-y-6">
+                <!-- Update Badge -->
+                <div class="flex items-center gap-2 text-sm text-gray-500">
+                    <div class="w-2 h-2 rounded-full bg-green-500"
+                         x-show="isRefreshing"
+                         x-transition></div>
+                    <span x-text="'Updated ' + formatRelativeTime(lastDashboardRefresh)"></span>
+                </div>
+
+                <!-- Overview Stats Cards -->
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <div class="stat-card">
+                        <div class="stat-label">Total Jobs</div>
+                        <div class="stat-value" x-text="dashboardData.overview.total_jobs"></div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Active Jobs</div>
+                        <div class="stat-value" x-text="dashboardData.overview.active_jobs"></div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Last Backup</div>
+                        <div class="stat-value text-lg" x-text="formatRelativeTime(dashboardData.overview.last_backup_time)"></div>
+                        <div class="stat-change">
+                            <span x-show="dashboardData.overview.last_backup_status"
+                                  :class="'badge ' + getStatusBadgeClass(dashboardData.overview.last_backup_status)"
+                                  x-text="dashboardData.overview.last_backup_status"></span>
+                            <span x-show="!dashboardData.overview.last_backup_status">No backups yet</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Scheduler</div>
+                        <div class="stat-value text-lg" x-text="dashboardData.overview.scheduler_running ? 'Running' : 'Stopped'"></div>
+                        <div class="stat-change">
+                            <span :class="dashboardData.overview.scheduler_running ? 'text-green-600' : 'text-red-600'"
+                                  x-text="dashboardData.overview.scheduler_running ? '● Active' : '● Inactive'"></span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Overall Statistics -->
+                <div class="card">
+                    <h2 class="card-header">Overall Statistics</h2>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <div>
+                            <p class="text-sm text-gray-500 mb-1">Total Backups</p>
+                            <p class="text-2xl font-semibold" x-text="dashboardData.statistics.total_backups || 0"></p>
+                        </div>
+                        <div>
+                            <p class="text-sm text-gray-500 mb-1">Success Rate</p>
+                            <p class="text-2xl font-semibold" x-text="(dashboardData.statistics.success_rate || 0) + '%'"></p>
+                        </div>
+                        <div>
+                            <p class="text-sm text-gray-500 mb-1">Total Size</p>
+                            <p class="text-2xl font-semibold" x-text="formatBytes(dashboardData.statistics.total_size || 0)"></p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Recent Activity -->
+                <div class="card">
+                    <h2 class="card-header">Recent Activity</h2>
+                    <div x-show="dashboardData.recentActivity.length === 0" class="empty-state">
+                        <p class="empty-state-text">No backup history yet</p>
+                        <p class="empty-state-subtext">Create a backup job to get started</p>
+                    </div>
+                    <div x-show="dashboardData.recentActivity.length > 0" class="overflow-x-auto">
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>Job Name</th>
+                                    <th>Status</th>
+                                    <th>Started</th>
+                                    <th>Duration</th>
+                                    <th>Size</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <template x-for="item in dashboardData.recentActivity" :key="item.id">
+                                    <tr>
+                                        <td class="font-medium" x-text="item.job_name"></td>
+                                        <td>
+                                            <span :class="'badge ' + getStatusBadgeClass(item.status)"
+                                                  x-text="item.status"></span>
+                                        </td>
+                                        <td class="text-gray-600" x-text="formatRelativeTime(item.started_at)"></td>
+                                        <td class="text-gray-600"
+                                            x-text="item.completed_at && item.started_at ? Math.round((new Date(item.completed_at) - new Date(item.started_at)) / 1000) + 's' : '-'"></td>
+                                        <td class="text-gray-600" x-text="item.file_size_bytes ? formatBytes(item.file_size_bytes) : '-'"></td>
+                                        <td>
+                                            <button x-show="item.status === 'running' || item.status === 'cancelling'"
+                                                    @click="cancelBackupFromDashboard(item.id)"
+                                                    class="btn-secondary btn-sm"
+                                                    :disabled="item.status === 'cancelling'"
+                                                    x-text="item.status === 'cancelling' ? 'Cancelling...' : 'Cancel'">
+                                            </button>
+                                            <span x-show="item.status !== 'running' && item.status !== 'cancelling'">-</span>
+                                        </td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Quick Actions -->
+                <div class="card">
+                    <h2 class="card-header">Quick Actions</h2>
+                    <div class="flex gap-4">
+                        <button @click="currentTab = 'jobs'" class="btn-primary">
+                            Create Backup Job
+                        </button>
+                        <button @click="currentTab = 'history'" class="btn-secondary">
+                            View All History
+                        </button>
+                    </div>
+                </div>
+            </div>
 
             <!-- Jobs Tab -->
             <div x-show="currentTab === 'jobs'" x-html="jobsHtml"></div>
 
             <!-- History Tab -->
-            <div x-show="currentTab === 'history'" x-html="historyHtml"></div>
+            <div x-show="currentTab === 'history'" class="space-y-6">
+                <!-- Header -->
+                <div class="flex justify-between items-center">
+                    <div>
+                        <h1 class="text-2xl font-bold text-gray-900">Backup History</h1>
+                        <div class="flex items-center gap-2 text-sm text-gray-500 mt-1">
+                            <div class="w-2 h-2 rounded-full bg-green-500"
+                                 x-show="isRefreshing"
+                                 x-transition></div>
+                            <span x-text="'Updated ' + formatRelativeTime(lastHistoryRefresh)"></span>
+                        </div>
+                    </div>
+                    <button @click="showCleanupDialog()" class="btn-secondary btn-sm">
+                        Cleanup Old Records
+                    </button>
+                </div>
+
+                <!-- Filters -->
+                <div class="card">
+                    <h2 class="text-sm font-semibold text-gray-700 mb-3">Filters</h2>
+                    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        <div>
+                            <label class="form-label">Status</label>
+                            <select class="form-select" @change="updateFilter('status', $event.target.value)">
+                                <option value="">All</option>
+                                <option value="success" :selected="historyData.filters.status === 'success'">Success</option>
+                                <option value="failed" :selected="historyData.filters.status === 'failed'">Failed</option>
+                                <option value="running" :selected="historyData.filters.status === 'running'">Running</option>
+                                <option value="cancelling" :selected="historyData.filters.status === 'cancelling'">Cancelling</option>
+                                <option value="cancelled" :selected="historyData.filters.status === 'cancelled'">Cancelled</option>
+                            </select>
+                        </div>
+
+                        <div>
+                            <label class="form-label">Job</label>
+                            <select class="form-select" @change="updateFilter('job_id', $event.target.value)">
+                                <option value="">All Jobs</option>
+                                <template x-for="job in historyData.jobs" :key="job.id">
+                                    <option :value="job.id" :selected="historyData.filters.job_id == job.id" x-text="job.name"></option>
+                                </template>
+                            </select>
+                        </div>
+
+                        <div>
+                            <label class="form-label">Time Range</label>
+                            <select class="form-select" @change="updateFilter('days', $event.target.value)">
+                                <option value="1" :selected="historyData.filters.days == 1">Last 24 hours</option>
+                                <option value="7" :selected="historyData.filters.days == 7">Last 7 days</option>
+                                <option value="30" :selected="historyData.filters.days == 30">Last 30 days</option>
+                                <option value="90" :selected="historyData.filters.days == 90">Last 90 days</option>
+                                <option value="" :selected="historyData.filters.days === ''">All time</option>
+                            </select>
+                        </div>
+
+                        <div class="flex items-end">
+                            <button @click="resetFilters()" class="btn-secondary w-full">
+                                Reset Filters
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- History Table -->
+                <div x-show="historyData.records.length === 0" class="card">
+                    <div class="empty-state">
+                        <p class="empty-state-text">No backup history found</p>
+                        <p class="empty-state-subtext">No backups match the selected filters</p>
+                    </div>
+                </div>
+
+                <div x-show="historyData.records.length > 0" class="card overflow-hidden">
+                    <div class="overflow-x-auto">
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>Job Name</th>
+                                    <th>Status</th>
+                                    <th>Started</th>
+                                    <th>Completed</th>
+                                    <th>Duration</th>
+                                    <th>Size</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <template x-for="item in historyData.records" :key="item.id">
+                                    <tr>
+                                        <td class="font-medium" x-text="getJobName(item.job_id, historyData.jobs)"></td>
+                                        <td>
+                                            <span :class="'badge ' + getStatusBadgeClass(item.status)"
+                                                  x-text="item.status"></span>
+                                        </td>
+                                        <td class="text-sm text-gray-600" x-text="formatDate(item.started_at)"></td>
+                                        <td class="text-sm text-gray-600" x-text="item.completed_at ? formatDate(item.completed_at) : '-'"></td>
+                                        <td class="text-sm text-gray-600"
+                                            x-text="calculateDuration(item.started_at, item.completed_at) ? calculateDuration(item.started_at, item.completed_at) + 's' : '-'"></td>
+                                        <td class="text-sm text-gray-600" x-text="item.file_size_bytes ? formatBytes(item.file_size_bytes) : '-'"></td>
+                                        <td>
+                                            <div class="flex gap-2">
+                                                <button x-show="item.status === 'running' || item.status === 'cancelling'"
+                                                        @click="cancelBackup(item.id)"
+                                                        class="btn-secondary btn-sm"
+                                                        :disabled="item.status === 'cancelling'"
+                                                        x-text="item.status === 'cancelling' ? 'Cancelling...' : 'Cancel'">
+                                                </button>
+                                                <button @click="viewLogs(item.id)" class="btn-secondary btn-sm">
+                                                    View Logs
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
 
             <!-- Settings Tab -->
             <div x-show="currentTab === 'settings'" x-html="settingsHtml"></div>
+        </div>
+    </div>
+
+    <!-- Global Modals (Outside Tab Content) -->
+    <!-- History Logs Modal -->
+    <div x-show="historyModalOpen"
+         @click.self="historyModalOpen = false"
+         class="modal-overlay"
+         style="display: none;"
+         x-transition>
+        <div class="modal-content max-w-4xl">
+            <div x-html="historyModalContent"></div>
         </div>
     </div>
 </div>
