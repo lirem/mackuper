@@ -38,8 +38,8 @@ def list_jobs():
             'schedule_cron': job.schedule_cron,
             'retention_s3_days': job.retention_s3_days,
             'retention_local_days': job.retention_local_days,
-            'created_at': job.created_at.isoformat(),
-            'updated_at': job.updated_at.isoformat()
+            'created_at': job.created_at.astimezone().isoformat(),
+            'updated_at': job.updated_at.astimezone().isoformat()
         })
 
     return jsonify(jobs_data)
@@ -97,8 +97,8 @@ def get_job(job_id):
         'schedule_cron': job.schedule_cron,
         'retention_s3_days': job.retention_s3_days,
         'retention_local_days': job.retention_local_days,
-        'created_at': job.created_at.isoformat(),
-        'updated_at': job.updated_at.isoformat()
+        'created_at': job.created_at.astimezone().isoformat(),
+        'updated_at': job.updated_at.astimezone().isoformat()
     })
 
 
@@ -386,8 +386,8 @@ def get_job_history(job_id):
         history_data.append({
             'id': record.id,
             'status': record.status,
-            'started_at': record.started_at.isoformat(),
-            'completed_at': record.completed_at.isoformat() if record.completed_at else None,
+            'started_at': record.started_at.astimezone().isoformat(),
+            'completed_at': record.completed_at.astimezone().isoformat() if record.completed_at else None,
             'file_size_mb': round(record.file_size_bytes / 1024 / 1024, 2) if record.file_size_bytes else None,
             's3_key': record.s3_key,
             'local_path': record.local_path,
