@@ -76,7 +76,7 @@ def get_aws_settings():
         'region': settings.region,
         'access_key_hint': access_key_hint,
         'secret_key_hint': secret_key_hint,
-        'updated_at': settings.updated_at.isoformat()
+        'updated_at': settings.updated_at.astimezone().isoformat()
     })
 
 

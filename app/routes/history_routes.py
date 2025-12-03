@@ -74,8 +74,8 @@ def list_history():
             'job_id': record.job_id,
             'job_name': record.job.name,
             'status': record.status,
-            'started_at': record.started_at.isoformat(),
-            'completed_at': record.completed_at.isoformat() if record.completed_at else None,
+            'started_at': record.started_at.astimezone().isoformat(),
+            'completed_at': record.completed_at.astimezone().isoformat() if record.completed_at else None,
             'file_size_bytes': record.file_size_bytes,
             'file_size_mb': round(record.file_size_bytes / 1024 / 1024, 2) if record.file_size_bytes else None,
             's3_key': record.s3_key,
@@ -117,8 +117,8 @@ def get_history_detail(history_id):
         'job_id': record.job_id,
         'job_name': record.job.name,
         'status': record.status,
-        'started_at': record.started_at.isoformat(),
-        'completed_at': record.completed_at.isoformat() if record.completed_at else None,
+        'started_at': record.started_at.astimezone().isoformat(),
+        'completed_at': record.completed_at.astimezone().isoformat() if record.completed_at else None,
         'duration_seconds': duration_seconds,
         'file_size_bytes': record.file_size_bytes,
         'file_size_mb': round(record.file_size_bytes / 1024 / 1024, 2) if record.file_size_bytes else None,
@@ -191,7 +191,7 @@ def get_history_summary():
         recent_info = {
             'job_name': recent.job.name,
             'status': recent.status,
-            'started_at': recent.started_at.isoformat()
+            'started_at': recent.started_at.astimezone().isoformat()
         }
 
     return jsonify({

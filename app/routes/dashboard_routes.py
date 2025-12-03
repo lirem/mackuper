@@ -42,7 +42,7 @@ def get_overview():
         last_backup_info = {
             'job_name': last_backup.job.name,
             'status': last_backup.status,
-            'completed_at': last_backup.completed_at.isoformat() if last_backup.completed_at else None,
+            'completed_at': last_backup.completed_at.astimezone().isoformat() if last_backup.completed_at else None,
             'file_size_mb': round(last_backup.file_size_bytes / 1024 / 1024, 2) if last_backup.file_size_bytes else None
         }
 
@@ -77,8 +77,8 @@ def get_recent_activity():
             'job_id': backup.job_id,
             'job_name': backup.job.name,
             'status': backup.status,
-            'started_at': backup.started_at.isoformat(),
-            'completed_at': backup.completed_at.isoformat() if backup.completed_at else None,
+            'started_at': backup.started_at.astimezone().isoformat(),
+            'completed_at': backup.completed_at.astimezone().isoformat() if backup.completed_at else None,
             'file_size_mb': round(backup.file_size_bytes / 1024 / 1024, 2) if backup.file_size_bytes else None,
             'error_message': backup.error_message
         })
