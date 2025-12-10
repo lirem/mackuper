@@ -108,20 +108,20 @@ class BackupExecutor:
     def _execute_workflow(self):
         """Execute the main backup workflow steps."""
         # Step 1: Create temporary directory
-        self._log("Creating temporary directory")
+        self._log("[PHASE:ACQUIRING] Creating temporary directory")
         self.temp_dir = tempfile.mkdtemp(prefix='mackuper_backup_')
         self._log(f"Temporary directory: {self.temp_dir}")
         self._flush_logs_to_db()
 
         # Step 2: Acquire source files
-        self._log(f"Acquiring source files (type: {self.job.source_type})")
+        self._log(f"[PHASE:ACQUIRING] Acquiring source files (type: {self.job.source_type})")
         acquired_paths = self._acquire_sources()
         self._log(f"Acquired {len(acquired_paths)} items")
         self._flush_logs_to_db()
         self._check_cancellation()  # Checkpoint 1
 
         # Step 3: Create archive
-        self._log(f"Creating archive (format: {self.job.compression_format})")
+        self._log(f"[PHASE:COMPRESSING] Creating archive (format: {self.job.compression_format})")
         self.archive_path = self._create_archive(acquired_paths)
         file_size = get_archive_size(self.archive_path)
         self.history_record.file_size_bytes = file_size
@@ -130,7 +130,7 @@ class BackupExecutor:
         self._check_cancellation()  # Checkpoint 2
 
         # Step 4: Upload to S3
-        self._log("Uploading to S3")
+        self._log("[PHASE:UPLOADING] Uploading to S3")
         s3_key = self._upload_to_s3()
         self.history_record.s3_key = s3_key
         self._log(f"Uploaded to S3: {s3_key}")
@@ -139,12 +139,14 @@ class BackupExecutor:
 
         # Step 5: Store locally (if configured)
         if self.job.retention_local_days is not None:
-            self._log("Storing local copy")
+            self._log("[PHASE:FINALIZING] Storing local copy")
             local_path = self._store_locally()
             self.history_record.local_path = local_path
             self._log(f"Stored locally: {local_path}")
         else:
-            self._log("Local storage not configured, skipping")
+            self._log("[PHASE:FINALIZING] Local storage not configured, skipping")
+
+        self._log("[PHASE:COMPLETE] Backup workflow complete")
 
     def _acquire_sources(self) -> List[str]:
         """
@@ -187,6 +189,10 @@ class BackupExecutor:
 
         # Create appropriate source handler
         source = create_source(self.job.source_type, source_config)
+
+        # Wire logging callback for file-level progress tracking
+        if hasattr(source, 'set_log_callback'):
+            source.set_log_callback(self._log)
 
         try:
             # Acquire files to temp directory
