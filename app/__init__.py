@@ -152,20 +152,31 @@ def create_app(config_name=None):
         else:
             app.logger.info("No stored password found - crypto manager will initialize on first login")
 
-    # Initialize and start scheduler (only in child process when using reloader)
+    # Initialize and start scheduler (only in designated worker or development child process)
     from app.scheduler import init_scheduler, start_scheduler, sync_backup_jobs, stop_scheduler
     import atexit
 
-    # Check if we're in the reloader parent process
-    # werkzeug sets WERKZEUG_RUN_MAIN in child process only
+    # Determine if this process should initialize the scheduler
     is_reloader_child = os.environ.get('WERKZEUG_RUN_MAIN') == 'true'
     is_development = app.config.get('DEBUG', False)
+    is_scheduler_worker = os.environ.get('SCHEDULER_WORKER', 'true').lower() == 'true'
 
-    # Only initialize scheduler if:
-    # 1. Not in development mode, OR
-    # 2. In development mode AND in the reloader child process
-    if not is_development or is_reloader_child:
-        app.logger.info("Initializing scheduler...")
+    # Scheduler initialization logic:
+    # - Development mode: Only in Flask reloader child process (not parent)
+    # - Production mode: Only in designated scheduler worker (SCHEDULER_WORKER=true)
+    should_init_scheduler = False
+
+    if is_development:
+        # Development: Use Flask reloader detection
+        should_init_scheduler = is_reloader_child
+        app.logger.info(f"Development mode: is_reloader_child={is_reloader_child}")
+    else:
+        # Production: Use Gunicorn worker designation
+        should_init_scheduler = is_scheduler_worker
+        app.logger.info(f"Production mode: is_scheduler_worker={is_scheduler_worker}")
+
+    if should_init_scheduler:
+        app.logger.info("Initializing scheduler in this process...")
         init_scheduler(app)
         start_scheduler()
 
@@ -175,8 +186,8 @@ def create_app(config_name=None):
 
         # Register cleanup function to stop scheduler on app shutdown
         atexit.register(stop_scheduler)
-        app.logger.info("Scheduler initialized and started")
+        app.logger.info("Scheduler initialized and started successfully")
     else:
-        app.logger.info("Skipping scheduler initialization (reloader parent process)")
+        app.logger.info("Scheduler initialization skipped in this process (not designated scheduler worker)")
 
     return app
