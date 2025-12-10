@@ -35,4 +35,5 @@ exec gunicorn \
     --access-logfile - \
     --error-logfile - \
     --log-level info \
+    --config /app/docker/gunicorn_conf.py \
     "app:create_app()"
