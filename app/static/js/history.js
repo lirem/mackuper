@@ -15,6 +15,61 @@ let historyState = {
     selectedLog: null
 };
 
+/**
+ * Parse backup logs to extract progress information.
+ */
+function parseBackupProgress(logs, status) {
+    if (!logs) {
+        return { phase: 'UNKNOWN', percentage: 0, phaseText: 'Initializing...', recentFiles: [] };
+    }
+
+    const lines = logs.split('\n');
+    const linesToParse = lines.length > 1000 ? lines.slice(-1000) : lines;
+
+    // Find last phase marker
+    const phaseRegex = /\[PHASE:(\w+)\]/;
+    let lastPhase = null;
+    for (let i = linesToParse.length - 1; i >= 0; i--) {
+        const match = linesToParse[i].match(phaseRegex);
+        if (match) {
+            lastPhase = match[1];
+            break;
+        }
+    }
+
+    // Map phase to progress
+    const phaseMap = {
+        'ACQUIRING': { pct: 15, text: 'Acquiring source files...' },
+        'COMPRESSING': { pct: 45, text: 'Creating compressed archive...' },
+        'UPLOADING': { pct: 75, text: 'Uploading to S3...' },
+        'FINALIZING': { pct: 95, text: 'Finalizing and cleanup...' },
+        'COMPLETE': { pct: 100, text: 'Complete' }
+    };
+
+    let result = { phase: lastPhase || 'UNKNOWN', percentage: 0, phaseText: 'Starting...', recentFiles: [] };
+
+    if (lastPhase && phaseMap[lastPhase]) {
+        result.percentage = phaseMap[lastPhase].pct;
+        result.phaseText = phaseMap[lastPhase].text;
+    } else if (status === 'success') {
+        result.percentage = 100;
+        result.phaseText = 'Complete';
+    }
+
+    // Extract recent files (→ Processing file: or → Downloading file:)
+    const fileRegex = /→ (?:Processing|Downloading) file: (.+?) \((.+?)\)/;
+    const recentFiles = [];
+    for (const line of linesToParse) {
+        const match = line.match(fileRegex);
+        if (match) {
+            recentFiles.push({ name: match[1], size: match[2] });
+        }
+    }
+    result.recentFiles = recentFiles.slice(-20); // Last 20 files
+
+    return result;
+}
+
 // Helper to get job name by ID
 function getJobName(jobId, jobs) {
     const job = jobs.find(j => j.id === jobId);
@@ -255,6 +310,27 @@ async function viewLogs(historyId) {
 
         const job = historyState.jobs.find(j => j.id === data.job_id);
         const jobName = job ? job.name : `Job #${data.job_id}`;
+        const progress = parseBackupProgress(data.logs, data.status);
+        const isRunning = data.status === 'running' || data.status === 'cancelling';
+
+        // Progress section (only for running or completed phase-tracked backups)
+        let progressHtml = '';
+        if (isRunning || progress.phase !== 'UNKNOWN') {
+            const pct = Math.min(100, Math.max(0, Math.round(progress.percentage)));
+            progressHtml = `
+                <div class="mb-4 border-l-4 border-blue-600 pl-4 ml-1" id="backup-progress-section">
+                    <div class="bg-gray-200 rounded-full h-6 mb-2 overflow-hidden">
+                        <div class="bg-blue-600 h-full flex items-center justify-center text-white text-xs font-semibold transition-all duration-300"
+                             style="width: ${pct}%" id="progress-bar">
+                            ${pct}%
+                        </div>
+                    </div>
+                    <div class="text-sm text-gray-600 mb-4" id="progress-phase-text">
+                        ${escapeHtml(progress.phaseText)}
+                    </div>
+                </div>
+            `;
+        }
 
         // Update modal content in persistent modal
         app.historyModalContent = `
@@ -276,7 +352,7 @@ async function viewLogs(historyId) {
             <div class="mb-4 grid grid-cols-2 gap-4 text-sm">
                 <div>
                     <span class="text-gray-500">Status:</span>
-                    <span class="ml-2 badge ${getStatusBadgeClass(data.status)}">${data.status}</span>
+                    <span class="ml-2 badge ${getStatusBadgeClass(data.status)}" id="status-badge">${data.status}</span>
                 </div>
                 <div>
                     <span class="text-gray-500">File Size:</span>
@@ -302,9 +378,16 @@ async function viewLogs(historyId) {
                 ` : ''}
             </div>
 
+            ${progressHtml}
+
             <div class="border-t border-gray-200 pt-4">
-                <h3 class="text-sm font-semibold text-gray-700 mb-2">Execution Logs</h3>
-                <div class="bg-gray-900 text-green-400 p-4 rounded font-mono text-xs overflow-x-auto max-h-96 overflow-y-auto">
+                <div class="flex justify-between items-center mb-2">
+                    <h3 class="text-sm font-semibold text-gray-700">Execution Logs</h3>
+                    <button onclick="toggleFullLogs()" class="text-sm text-blue-600 hover:text-blue-800 font-medium" id="toggle-logs-btn">
+                        Show Full Logs ▼
+                    </button>
+                </div>
+                <div class="bg-gray-900 text-green-400 p-4 rounded font-mono text-xs overflow-x-auto max-h-96 overflow-y-auto hidden" id="full-logs-content">
                     ${data.logs ? escapeHtml(data.logs).replace(/\n/g, '<br>') : '<span class="text-gray-500">No logs available</span>'}
                 </div>
             </div>
@@ -318,14 +401,111 @@ async function viewLogs(historyId) {
 
         // Open persistent modal
         app.historyModalOpen = true;
+        app.currentHistoryId = historyId;
+
+        // Start polling if backup is running
+        if (isRunning) {
+            startLogPolling(historyId);
+        }
     } catch (error) {
         alert('Failed to load logs: ' + error.message);
     }
 }
 
+function toggleFullLogs() {
+    const content = document.getElementById('full-logs-content');
+    const btn = document.getElementById('toggle-logs-btn');
+    if (content && btn) {
+        if (content.classList.contains('hidden')) {
+            content.classList.remove('hidden');
+            btn.textContent = 'Hide Full Logs ▲';
+        } else {
+            content.classList.add('hidden');
+            btn.textContent = 'Show Full Logs ▼';
+        }
+    }
+}
+
+// Polling for real-time progress updates
+let logPollingInterval = null;
+
+function startLogPolling(historyId) {
+    stopLogPolling();
+    console.log(`Starting polling for history ${historyId}`);
+
+    logPollingInterval = setInterval(async () => {
+        try {
+            const response = await fetch(`/api/history/${historyId}`);
+            const data = await response.json();
+            updateProgressDisplay(data);
+
+            // Stop if no longer running
+            if (data.status !== 'running' && data.status !== 'cancelling') {
+                stopLogPolling();
+                // Refresh modal with final state
+                const app = Alpine.$data(document.querySelector('[x-data]'));
+                if (app.historyModalOpen && app.currentHistoryId === historyId) {
+                    viewLogs(historyId);
+                }
+            }
+        } catch (error) {
+            console.error('Polling failed:', error);
+        }
+    }, 2000);
+}
+
+function stopLogPolling() {
+    if (logPollingInterval) {
+        console.log('Stopping log polling');
+        clearInterval(logPollingInterval);
+        logPollingInterval = null;
+    }
+}
+
+function updateProgressDisplay(data) {
+    const app = Alpine.$data(document.querySelector('[x-data]'));
+    if (!app.historyModalOpen) {
+        stopLogPolling();
+        return;
+    }
+
+    const progress = parseBackupProgress(data.logs, data.status);
+
+    // Update progress bar
+    const bar = document.getElementById('progress-bar');
+    if (bar) {
+        const pct = Math.min(100, Math.max(0, Math.round(progress.percentage)));
+        bar.style.width = `${pct}%`;
+        bar.textContent = `${pct}%`;
+    }
+
+    // Update phase text
+    const phaseText = document.getElementById('progress-phase-text');
+    if (phaseText) {
+        phaseText.textContent = progress.phaseText;
+    }
+
+    // Update full logs if visible
+    const fullLogs = document.getElementById('full-logs-content');
+    if (fullLogs && !fullLogs.classList.contains('hidden')) {
+        fullLogs.innerHTML = data.logs
+            ? escapeHtml(data.logs).replace(/\n/g, '<br>')
+            : '<span class="text-gray-500">No logs available</span>';
+    }
+
+    // Update status badge
+    const statusBadge = document.getElementById('status-badge');
+    if (statusBadge && data.status) {
+        statusBadge.className = `badge ${getStatusBadgeClass(data.status)}`;
+        statusBadge.textContent = data.status;
+    }
+}
+
 function closeLogsModal() {
+    stopLogPolling();
     const app = Alpine.$data(document.querySelector('[x-data]'));
     app.historyModalOpen = false;
+    app.currentHistoryId = null;
 }
 
 async function cancelBackup(historyId) {

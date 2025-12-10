@@ -40,6 +40,24 @@ class LocalSource:
         self.paths = paths
         self.exclude_patterns = exclude_patterns or []
         self.temp_dir = None
+        self._log_callback = None
+        self._file_count = 0
+
+    def set_log_callback(self, callback):
+        """Allow executor to pass logging callback for progress tracking."""
+        self._log_callback = callback
+
+    def _log_file(self, path, size):
+        """Log file with throttling (every 10th file or large files >1MB)."""
+        if not self._log_callback:
+            return
+
+        self._file_count += 1
+        # Log every 10th file OR files >1MB
+        if self._file_count % 10 == 0 or size > 1_048_576:
+            size_mb = size / 1024 / 1024
+            filename = Path(path).name
+            self._log_callback(f"  → Processing file: {filename} ({size_mb:.2f} MB)")
 
     def _should_exclude(self, path: Path) -> bool:
         """
@@ -97,6 +115,8 @@ class LocalSource:
             try:
                 if source_path.is_file():
                     if not self._should_exclude(source_path):
+                        size = source_path.stat().st_size
+                        self._log_file(str(source_path), size)
                         shutil.copy2(source_path, dest_path)
                         acquired_paths.append(str(dest_path))
                 elif source_path.is_dir():
@@ -107,6 +127,13 @@ class LocalSource:
                             file_path = Path(directory) / name
                             if self._should_exclude(file_path):
                                 ignored.append(name)
+                            elif file_path.is_file():
+                                # Log files being processed
+                                try:
+                                    size = file_path.stat().st_size
+                                    self._log_file(str(file_path), size)
+                                except:
+                                    pass  # If stat fails, just skip logging
                         return ignored
 
                     shutil.copytree(source_path, dest_path, symlinks=False, ignore=ignore_patterns)
@@ -156,6 +183,24 @@ class SSHSource:
         self.ssh_client = None
         self.sftp_client = None
         self.temp_dir = None
+        self._log_callback = None
+        self._file_count = 0
+
+    def set_log_callback(self, callback):
+        """Allow executor to pass logging callback for progress tracking."""
+        self._log_callback = callback
+
+    def _log_file(self, path, size):
+        """Log file with throttling (every 10th file or large files >1MB)."""
+        if not self._log_callback:
+            return
+
+        self._file_count += 1
+        # Log every 10th file OR files >1MB
+        if self._file_count % 10 == 0 or size > 1_048_576:
+            size_mb = size / 1024 / 1024
+            filename = os.path.basename(path)
+            self._log_callback(f"  → Downloading file: {filename} ({size_mb:.2f} MB)")
 
     def _connect(self):
         """
@@ -206,6 +251,13 @@ class SSHSource:
             local_path: Local destination path
         """
         try:
+            # Get file size for logging
+            try:
+                stat = self.sftp_client.stat(remote_path)
+                self._log_file(remote_path, stat.st_size)
+            except:
+                pass  # If stat fails, just skip logging
+
             self.sftp_client.get(remote_path, local_path)
         except FileNotFoundError:
             raise SourceError(f"Remote file not found: {remote_path}")
