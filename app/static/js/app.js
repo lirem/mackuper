@@ -48,6 +48,13 @@ function mackuperApp() {
 
         // Initialization
         async init() {
+            // Restore tab from URL hash
+            const hash = window.location.hash.substring(1); // Remove '#' prefix
+            const validTabs = ['dashboard', 'jobs', 'history', 'settings'];
+            if (hash && validTabs.includes(hash)) {
+                this.currentTab = hash;
+            }
+
             // Check scheduler status
             await this.checkSchedulerStatus();
 
@@ -60,6 +67,16 @@ function mackuperApp() {
             // Watch for tab changes
             this.$watch('currentTab', (value) => {
                 this.onTabChange(value);
+            });
+
+            // Listen for browser back/forward navigation
+            window.addEventListener('hashchange', () => {
+                const newHash = window.location.hash.substring(1);
+                if (newHash && validTabs.includes(newHash)) {
+                    this.currentTab = newHash;
+                } else if (!newHash) {
+                    this.currentTab = 'dashboard';
+                }
             });
 
             // Start polling for updates (every 10 seconds)
@@ -86,6 +103,12 @@ function mackuperApp() {
 
         // Tab change handler
         onTabChange(tab) {
+            // Update URL hash to persist tab state
+            const currentHash = window.location.hash.substring(1);
+            if (currentHash !== tab) {
+                window.location.hash = tab;
+            }
+
             // Refresh content when switching tabs
             if (tab === 'dashboard') {
                 this.refreshDashboard();
