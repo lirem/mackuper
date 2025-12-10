@@ -19,8 +19,7 @@ function mackuperApp() {
             overview: {
                 total_jobs: 0,
                 active_jobs: 0,
-                last_backup_time: null,
-                last_backup_status: null,
+                last_backup: null,
                 scheduler_running: false
             },
             recentActivity: [],
@@ -40,6 +39,7 @@ function mackuperApp() {
         // Modal state
         historyModalOpen: false,
         historyModalContent: '',
+        currentHistoryId: null,
 
         // Refresh timestamps
         lastDashboardRefresh: Date.now(),

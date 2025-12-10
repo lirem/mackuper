@@ -101,12 +101,12 @@
                     </div>
                     <div class="stat-card">
                         <div class="stat-label">Last Backup</div>
-                        <div class="stat-value text-lg" x-text="formatRelativeTime(dashboardData.overview.last_backup_time)"></div>
+                        <div class="stat-value text-lg" x-text="formatRelativeTime(dashboardData.overview.last_backup?.completed_at)"></div>
                         <div class="stat-change">
-                            <span x-show="dashboardData.overview.last_backup_status"
-                                  :class="'badge ' + getStatusBadgeClass(dashboardData.overview.last_backup_status)"
-                                  x-text="dashboardData.overview.last_backup_status"></span>
-                            <span x-show="!dashboardData.overview.last_backup_status">No backups yet</span>
+                            <span x-show="dashboardData.overview.last_backup?.status"
+                                  :class="'badge ' + getStatusBadgeClass(dashboardData.overview.last_backup?.status)"
+                                  x-text="dashboardData.overview.last_backup?.status"></span>
+                            <span x-show="!dashboardData.overview.last_backup">No backups yet</span>
                         </div>
                     </div>
                     <div class="stat-card">
