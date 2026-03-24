@@ -512,8 +512,10 @@ async function cancelBackup(historyId) {
     if (!confirm('Cancel this running backup? Temporary files will be cleaned up.')) return;
 
     try {
+        const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
         const response = await fetch(`/api/history/${historyId}/cancel`, {
-            method: 'POST'
+            method: 'POST',
+            headers: { 'X-CSRFToken': csrfToken }
         });
 
         const result = await response.json();
@@ -546,9 +548,10 @@ async function showCleanupDialog() {
     if (!confirm(`Delete all backup history older than ${daysNum} days?`)) return;
 
     try {
+        const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
         const response = await fetch('/api/history/cleanup', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
             body: JSON.stringify({ days: daysNum })
         });
 

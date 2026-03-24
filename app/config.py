@@ -31,7 +31,7 @@ class Config:
 
     # CSRF
     WTF_CSRF_ENABLED = True
-    WTF_CSRF_TIME_LIMIT = None
+    WTF_CSRF_TIME_LIMIT = 3600
 
     # Upload/Temp
     TEMP_DIR = os.environ.get('TEMP_DIR') or '/data/temp'
@@ -61,7 +61,7 @@ class ProductionConfig(Config):
     SQLALCHEMY_ECHO = False
 
     # Production security
-    SESSION_COOKIE_SECURE = os.environ.get('HTTPS_ENABLED', 'false').lower() == 'true'
+    SESSION_COOKIE_SECURE = True
 
 
 # Configuration dictionary

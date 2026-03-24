@@ -3,6 +3,7 @@ Authentication routes: login, logout, and first-run setup wizard.
 """
 
 from datetime import datetime
+from urllib.parse import urlparse
 from flask import Blueprint, render_template, request, redirect, url_for, flash, session, current_app
 from flask_login import login_user, logout_user, login_required
 from app import db
@@ -71,16 +72,16 @@ def login():
             current_app.logger.error(f"Failed to save encrypted password: {e}")
             flash('Warning: Auto-unlock may not work on restart', 'warning')
 
-        # Store password in session for re-initialization
-        session['user_password'] = password
-
         # Log user in
         login_user(UserModel(user), remember=True)
         flash('Login successful!', 'success')
 
-        # Redirect to next page or home (dashboard will be added in Phase 5)
-        next_page = request.args.get('next')
-        return redirect(next_page) if next_page else redirect('/')
+        # Redirect to next page or home — validate to prevent open redirect
+        next_page = request.args.get('next', '')
+        parsed = urlparse(next_page)
+        if not next_page or parsed.netloc or parsed.scheme:
+            next_page = '/'
+        return redirect(next_page)
 
     return render_template('login.html')
 

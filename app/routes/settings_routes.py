@@ -6,10 +6,10 @@ import logging
 import sys
 import traceback
 from datetime import datetime
-from flask import Blueprint, jsonify, request, session, current_app
+from flask import Blueprint, jsonify, request, current_app
 from flask_login import login_required, current_user
 
-from app import db
+from app import db, _reinit_crypto_from_stored
 from app.models import AWSSettings, User, EncryptionKey
 from app.utils.crypto import crypto_manager
 from app.backup.storage import S3Storage, StorageError
@@ -39,10 +39,8 @@ def get_aws_settings():
         })
 
     # Re-initialize crypto_manager if needed
-    if not crypto_manager.is_initialized and 'user_password' in session:
-        encryption_key = EncryptionKey.query.first()
-        if encryption_key:
-            crypto_manager.initialize(session['user_password'], encryption_key.key_encrypted)
+    if not crypto_manager.is_initialized:
+        _reinit_crypto_from_stored()
 
     # Generate hints if crypto_manager is initialized
     access_key_hint = None
@@ -181,13 +179,10 @@ def test_aws_connection():
             # Re-initialize crypto_manager if needed
             if not crypto_manager.is_initialized:
                 logger.info("Crypto manager not initialized, attempting initialization")
-                encryption_key = EncryptionKey.query.first()
-                if encryption_key and 'user_password' in session:
-                    crypto_manager.initialize(session['user_password'], encryption_key.key_encrypted)
-                    logger.info("Crypto manager initialized successfully")
-                else:
-                    logger.error("Cannot initialize crypto manager - session expired")
-                    return jsonify({'error': 'Session expired. Please log out and log back in.'}), 401
+                if not _reinit_crypto_from_stored():
+                    logger.error("Cannot initialize crypto manager")
+                    return jsonify({'error': 'Encryption not available. Please log in again.'}), 503
+                logger.info("Crypto manager initialized successfully")
 
             try:
                 access_key = crypto_manager.decrypt(settings.access_key_encrypted)
@@ -287,9 +282,6 @@ def change_password():
         if encryption_key:
             # Re-initialize crypto manager with new password
             crypto_manager.initialize(data['new_password'], encryption_key.key_encrypted)
-
-            # Update session password
-            session['user_password'] = data['new_password']
 
             # Save encrypted password
             master_key_manager = get_master_key_manager(current_app)

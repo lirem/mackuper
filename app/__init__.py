@@ -13,6 +13,29 @@ login_manager = LoginManager()
 csrf = CSRFProtect()
 
 
+def _reinit_crypto_from_stored():
+    """
+    Re-initialize crypto_manager from the stored encrypted password using MasterKeyManager.
+    Reuses the same mechanism as the startup auto-unlock. Does not require session.
+    Returns True if successful, False otherwise.
+    """
+    from app.models import EncryptionKey
+    from app.utils.crypto import crypto_manager
+    from app.utils.master_key import get_master_key_manager
+    from flask import current_app
+
+    try:
+        encryption_key = EncryptionKey.query.first()
+        if not encryption_key or not encryption_key.password_encrypted:
+            return False
+        master_key_manager = get_master_key_manager(current_app._get_current_object())
+        password = master_key_manager.decrypt_password(encryption_key.password_encrypted)
+        crypto_manager.initialize(password, encryption_key.key_encrypted)
+        return True
+    except Exception:
+        return False
+
+
 def configure_logging(app):
     """Configure application logging"""
 
@@ -83,6 +106,19 @@ def create_app(config_name=None):
     login_manager.init_app(app)
     csrf.init_app(app)
 
+    # Enable SQLite WAL mode for concurrent read/write access
+    from sqlalchemy import event
+    from sqlalchemy.engine import Engine
+    import sqlite3 as _sqlite3
+
+    @event.listens_for(Engine, "connect")
+    def set_sqlite_pragmas(dbapi_connection, connection_record):
+        if isinstance(dbapi_connection, _sqlite3.Connection):
+            cursor = dbapi_connection.cursor()
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA busy_timeout=30000")
+            cursor.close()
+
     # Configure login manager
     login_manager.login_view = 'auth.login'
     login_manager.login_message = 'Please log in to access this page.'
@@ -97,19 +133,13 @@ def create_app(config_name=None):
             return UserModel(user)
         return None
 
-    # Register blueprints FIRST (before CSRF exemption)
+    # Register blueprints
     from app.routes import auth_routes, dashboard_routes, jobs_routes, settings_routes, history_routes
     app.register_blueprint(auth_routes.bp)
     app.register_blueprint(dashboard_routes.bp)
     app.register_blueprint(jobs_routes.bp)
     app.register_blueprint(settings_routes.bp)
     app.register_blueprint(history_routes.bp)
-
-    # THEN exempt API routes from CSRF protection (using blueprint instances)
-    csrf.exempt(settings_routes.bp)
-    csrf.exempt(jobs_routes.bp)
-    csrf.exempt(dashboard_routes.bp)
-    csrf.exempt(history_routes.bp)
 
     # Health check endpoint
     @app.route('/health')
@@ -159,7 +189,7 @@ def create_app(config_name=None):
     # Determine if this process should initialize the scheduler
     is_reloader_child = os.environ.get('WERKZEUG_RUN_MAIN') == 'true'
     is_development = app.config.get('DEBUG', False)
-    is_scheduler_worker = os.environ.get('SCHEDULER_WORKER', 'true').lower() == 'true'
+    is_scheduler_worker = os.environ.get('SCHEDULER_WORKER', 'false').lower() == 'true'
 
     # Scheduler initialization logic:
     # - Development mode: Only in Flask reloader child process (not parent)
@@ -169,11 +199,11 @@ def create_app(config_name=None):
     if is_development:
         # Development: Use Flask reloader detection
         should_init_scheduler = is_reloader_child
-        app.logger.info(f"Development mode: is_reloader_child={is_reloader_child}")
+        app.logger.info(f"Development mode (PID {os.getpid()}): is_reloader_child={is_reloader_child}")
     else:
         # Production: Use Gunicorn worker designation
         should_init_scheduler = is_scheduler_worker
-        app.logger.info(f"Production mode: is_scheduler_worker={is_scheduler_worker}")
+        app.logger.info(f"Production mode (PID {os.getpid()}): is_scheduler_worker={is_scheduler_worker}")
 
     if should_init_scheduler:
         app.logger.info("Initializing scheduler in this process...")

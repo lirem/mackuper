@@ -3,11 +3,11 @@ Backup jobs routes - CRUD operations and job execution.
 """
 
 import json
-from flask import Blueprint, jsonify, request, session
+from flask import Blueprint, jsonify, request
 from flask_login import login_required
 
-from app import db
-from app.models import BackupJob, BackupHistory, EncryptionKey
+from app import db, _reinit_crypto_from_stored
+from app.models import BackupJob, BackupHistory
 from app.scheduler import sync_backup_jobs, trigger_backup_now
 from app.utils.crypto import crypto_manager
 
@@ -65,10 +65,8 @@ def get_job(job_id):
     # Add password hint for SSH jobs (never return full password)
     if job.source_type == 'ssh' and job.ssh_password_encrypted:
         # Re-initialize crypto_manager if needed
-        if not crypto_manager.is_initialized and 'user_password' in session:
-            encryption_key = EncryptionKey.query.first()
-            if encryption_key:
-                crypto_manager.initialize(session['user_password'], encryption_key.key_encrypted)
+        if not crypto_manager.is_initialized:
+            _reinit_crypto_from_stored()
 
         if crypto_manager.is_initialized:
             try:
@@ -156,11 +154,8 @@ def create_job():
     if data['source_type'] == 'ssh' and source_config.get('password'):
         # Re-initialize crypto_manager if needed
         if not crypto_manager.is_initialized:
-            encryption_key = EncryptionKey.query.first()
-            if encryption_key and 'user_password' in session:
-                crypto_manager.initialize(session['user_password'], encryption_key.key_encrypted)
-            else:
-                return jsonify({'error': 'Session expired. Please log out and log back in.'}), 401
+            if not _reinit_crypto_from_stored():
+                return jsonify({'error': 'Encryption not available. Please log in again.'}), 503
 
         # Encrypt password
         ssh_password_encrypted = crypto_manager.encrypt(source_config['password'])
@@ -242,11 +237,8 @@ def update_job(job_id):
             if password:
                 # Re-initialize crypto_manager if needed
                 if not crypto_manager.is_initialized:
-                    encryption_key = EncryptionKey.query.first()
-                    if encryption_key and 'user_password' in session:
-                        crypto_manager.initialize(session['user_password'], encryption_key.key_encrypted)
-                    else:
-                        return jsonify({'error': 'Session expired. Please log out and log back in.'}), 401
+                    if not _reinit_crypto_from_stored():
+                        return jsonify({'error': 'Encryption not available. Please log in again.'}), 503
 
                 # Encrypt new password
                 job.ssh_password_encrypted = crypto_manager.encrypt(password)

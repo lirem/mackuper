@@ -198,10 +198,12 @@ function mackuperApp() {
         // Utility: API call wrapper
         async apiCall(url, options = {}) {
             try {
+                const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
                 const response = await fetch(url, {
                     ...options,
                     headers: {
                         'Content-Type': 'application/json',
+                        ...(csrfToken ? { 'X-CSRFToken': csrfToken } : {}),
                         ...options.headers
                     }
                 });

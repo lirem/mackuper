@@ -354,10 +354,11 @@ async function saveJob(event) {
     try {
         const url = isEdit ? `/api/jobs/${jobsState.editingJob.id}` : '/api/jobs';
         const method = isEdit ? 'PUT' : 'POST';
+        const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
 
         const response = await fetch(url, {
             method,
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
             body: JSON.stringify(jobData)
         });
 
@@ -382,7 +383,11 @@ async function runJobNow(jobId) {
     if (!confirm('Run this backup job now?')) return;
 
     try {
-        const response = await fetch(`/api/jobs/${jobId}/run`, { method: 'POST' });
+        const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
+        const response = await fetch(`/api/jobs/${jobId}/run`, {
+            method: 'POST',
+            headers: { 'X-CSRFToken': csrfToken }
+        });
         const result = await response.json();
 
         const app = Alpine.$data(document.querySelector('[x-data]'));
@@ -396,7 +401,11 @@ async function runJobNow(jobId) {
 
 async function toggleJob(jobId, enable) {
     try {
-        const response = await fetch(`/api/jobs/${jobId}/toggle`, { method: 'POST' });
+        const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
+        const response = await fetch(`/api/jobs/${jobId}/toggle`, {
+            method: 'POST',
+            headers: { 'X-CSRFToken': csrfToken }
+        });
         const result = await response.json();
 
         const app = Alpine.$data(document.querySelector('[x-data]'));
@@ -421,7 +430,11 @@ async function deleteJob(jobId, jobName) {
     if (!confirm(`Delete job "${jobName}"? This will also delete all associated backup history.`)) return;
 
     try {
-        const response = await fetch(`/api/jobs/${jobId}`, { method: 'DELETE' });
+        const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
+        const response = await fetch(`/api/jobs/${jobId}`, {
+            method: 'DELETE',
+            headers: { 'X-CSRFToken': csrfToken }
+        });
         const result = await response.json();
 
         const app = Alpine.$data(document.querySelector('[x-data]'));
