@@ -1,5 +1,6 @@
 # Claude Code
 .claude/
+.full-review/
 
 # Python
 __pycache__/
