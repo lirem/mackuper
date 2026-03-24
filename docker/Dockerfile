@@ -1,6 +1,6 @@
 # Multi-stage Dockerfile for Mackuper
 # Stage 1: Base image with dependencies
-FROM python:3.11-slim as base
+FROM python:3.11-slim AS base
 
 # Set working directory
 WORKDIR /app
