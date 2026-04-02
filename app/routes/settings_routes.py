@@ -3,17 +3,18 @@ Settings routes - AWS configuration and user settings management.
 """
 
 import logging
+import secrets
 import sys
 import traceback
-from datetime import datetime
+from datetime import datetime, timezone
 from flask import Blueprint, jsonify, request, current_app
-from flask_login import login_required, current_user
+from flask_login import login_required, login_user, current_user
 
 from app import db, _reinit_crypto_from_stored
 from app.models import AWSSettings, User, EncryptionKey
 from app.utils.crypto import crypto_manager
 from app.backup.storage import S3Storage, StorageError
-from app.auth import hash_password, validate_password_strength
+from app.auth import hash_password, verify_password, validate_password_strength, UserModel
 
 
 bp = Blueprint('settings', __name__, url_prefix='/api/settings')
@@ -261,7 +262,6 @@ def change_password():
     user = User.query.get(current_user.id)
 
     # Verify current password
-    from app.auth import verify_password
     if not verify_password(user.password_hash, data['current_password']):
         return jsonify({'error': 'Current password is incorrect'}), 400
 
@@ -272,6 +272,9 @@ def change_password():
 
     # Hash and save new password
     user.password_hash = hash_password(data['new_password'])
+
+    # Rotate session token to invalidate all existing sessions
+    user.session_token = secrets.token_urlsafe(32)
 
     # Update encrypted password storage
     try:
@@ -287,17 +290,22 @@ def change_password():
             master_key_manager = get_master_key_manager(current_app)
             encrypted_password = master_key_manager.encrypt_password(data['new_password'])
             encryption_key.password_encrypted = encrypted_password
-            encryption_key.updated_at = datetime.utcnow()
+            encryption_key.updated_at = datetime.now(timezone.utc)
 
             logger.info("Encrypted password updated after password change")
 
     except Exception as e:
         logger.error(f"Failed to update encrypted password: {e}")
         # Don't fail the password change, but warn the user
-        db.session.commit()  # Commit password hash change
+        db.session.commit()  # Commit password hash + token rotation
+        login_user(UserModel(user), remember=True)
         return jsonify({'message': 'Password changed but auto-unlock may not work. Please re-login.'}), 200
 
     db.session.commit()
+
+    # Refresh the current session cookie with the new token so the
+    # user who just changed their password stays logged in.
+    login_user(UserModel(user), remember=True)
 
     return jsonify({'message': 'Password changed successfully'})
 

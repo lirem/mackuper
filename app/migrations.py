@@ -113,6 +113,32 @@ def run_migrations(app, inspector=None):
                 logger.error(f"Failed to add cancellation_requested column: {e}")
                 db.session.rollback()
 
+    # Migration 4: Add session_token column to users table
+    if 'users' in inspector.get_table_names():
+        columns = [col['name'] for col in inspector.get_columns('users')]
+
+        if 'session_token' not in columns:
+            logger.info("Running migration: Adding session_token column to users table")
+            try:
+                # Add the column as nullable first so existing rows are accepted
+                db.session.execute(text(
+                    "ALTER TABLE users ADD COLUMN session_token VARCHAR(43)"
+                ))
+                db.session.commit()
+                logger.info("Successfully added session_token column")
+
+                # Populate a unique token for every existing user using SQLite's
+                # randomblob so no Python loop is required
+                db.session.execute(text(
+                    "UPDATE users SET session_token = lower(hex(randomblob(21))) "
+                    "WHERE session_token IS NULL"
+                ))
+                db.session.commit()
+                logger.info("Successfully populated session_token for existing users")
+            except Exception as e:
+                logger.error(f"Failed to add session_token column: {e}")
+                db.session.rollback()
+
 
 def _migrate_ssh_passwords():
     """

@@ -74,8 +74,8 @@ class UserModel(UserMixin):
         self.user = user
 
     def get_id(self):
-        """Return user ID as required by Flask-Login."""
-        return str(self.user.id)
+        """Return composite user ID (id:session_token) as required by Flask-Login."""
+        return f"{self.user.id}:{self.user.session_token}"
 
     @property
     def id(self):

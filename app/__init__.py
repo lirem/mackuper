@@ -128,9 +128,13 @@ def create_app(config_name=None):
     def load_user(user_id):
         from app.models import User
         from app.auth import UserModel
-        user = User.query.get(int(user_id))
-        if user:
-            return UserModel(user)
+        try:
+            uid, token = user_id.split(':', 1)
+            user = User.query.get(int(uid))
+            if user and user.session_token == token:
+                return UserModel(user)
+        except (ValueError, AttributeError):
+            pass
         return None
 
     # Register blueprints
