@@ -9,7 +9,7 @@ Supports:
 import os
 import shutil
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 import boto3
 from botocore.exceptions import ClientError, BotoCoreError
@@ -372,7 +372,7 @@ class LocalStorage:
 
                     files.append({
                         'path': str(relative_path),
-                        'modified': datetime.fromtimestamp(stat.st_mtime),
+                        'modified': datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc),
                         'size': stat.st_size
                     })
 

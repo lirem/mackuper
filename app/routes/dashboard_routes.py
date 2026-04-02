@@ -4,7 +4,7 @@ Dashboard routes - Overview and statistics endpoints.
 
 from flask import Blueprint, jsonify
 from flask_login import login_required
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from sqlalchemy import func
 
 from app import db
@@ -116,7 +116,7 @@ def get_statistics():
     total_size_gb = round(total_size_bytes / 1024 / 1024 / 1024, 2)
 
     # Backups in time ranges
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     seven_days_ago = now - timedelta(days=7)
     thirty_days_ago = now - timedelta(days=30)
 

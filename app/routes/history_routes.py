@@ -4,7 +4,7 @@ Backup history routes - View and manage backup execution history.
 
 from flask import Blueprint, jsonify, request
 from flask_login import login_required
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from app import db
 from app.models import BackupHistory, BackupJob
@@ -55,7 +55,7 @@ def list_history():
         query = query.filter(BackupHistory.job_id == job_id_filter)
 
     if days_filter and days_filter > 0:
-        cutoff_date = datetime.utcnow() - timedelta(days=days_filter)
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=days_filter)
         query = query.filter(BackupHistory.started_at >= cutoff_date)
 
     # Get total count before pagination
@@ -169,7 +169,7 @@ def get_history_summary():
     if days > 365:
         days = 365
 
-    cutoff_date = datetime.utcnow() - timedelta(days=days)
+    cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
 
     # Query for records within time range
     query = BackupHistory.query.filter(BackupHistory.started_at >= cutoff_date)
@@ -264,7 +264,7 @@ def cleanup_old_history():
     if days < 30:
         return jsonify({'error': 'Cannot delete records newer than 30 days'}), 400
 
-    cutoff_date = datetime.utcnow() - timedelta(days=days)
+    cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
 
     # Find old records
     old_records = BackupHistory.query.filter(

@@ -5,7 +5,7 @@ Manages cleanup of old backups from both S3 and local storage based on
 configured retention policies.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any
 
 from app import db
@@ -144,7 +144,7 @@ class RetentionManager:
         )
 
         # Calculate cutoff date
-        cutoff_date = datetime.now() - timedelta(days=job.retention_s3_days)
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=job.retention_s3_days)
 
         # List all objects with job name prefix
         try:
@@ -156,7 +156,7 @@ class RetentionManager:
         # Filter objects older than cutoff
         to_delete = [
             obj for obj in objects
-            if obj['LastModified'].replace(tzinfo=None) < cutoff_date
+            if obj['LastModified'] < cutoff_date
         ]
 
         # Delete old objects
@@ -201,7 +201,7 @@ class RetentionManager:
         local_storage = LocalStorage(local_storage_path)
 
         # Calculate cutoff date
-        cutoff_date = datetime.now() - timedelta(days=job.retention_local_days)
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=job.retention_local_days)
 
         # List all files for job
         try:
@@ -245,7 +245,7 @@ class RetentionManager:
         Args:
             message: Log message
         """
-        timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
+        timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
         log_entry = f"[{timestamp}] {message}"
         self.logs.append(log_entry)
         print(log_entry)  # Also print to console
