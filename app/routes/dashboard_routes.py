@@ -6,6 +6,7 @@ from flask import Blueprint, jsonify
 from flask_login import login_required
 from datetime import datetime, timedelta, timezone
 from sqlalchemy import func
+from sqlalchemy.orm import selectinload
 
 from app import db
 from app.models import BackupJob, BackupHistory
@@ -33,7 +34,9 @@ def get_overview():
     active_jobs = BackupJob.query.filter_by(enabled=True).count()
 
     # Get most recent backup
-    last_backup = BackupHistory.query.order_by(
+    last_backup = BackupHistory.query.options(
+        selectinload(BackupHistory.job)
+    ).order_by(
         BackupHistory.completed_at.desc()
     ).first()
 
@@ -66,7 +69,9 @@ def get_recent_activity():
     Returns:
         JSON array of recent backup history records
     """
-    recent_backups = BackupHistory.query.order_by(
+    recent_backups = BackupHistory.query.options(
+        selectinload(BackupHistory.job)
+    ).order_by(
         BackupHistory.started_at.desc()
     ).limit(10).all()
 

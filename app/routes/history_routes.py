@@ -6,6 +6,8 @@ from flask import Blueprint, jsonify, request
 from flask_login import login_required
 from datetime import datetime, timedelta, timezone
 
+from sqlalchemy.orm import selectinload
+
 from app import db
 from app.models import BackupHistory, BackupJob
 
@@ -62,7 +64,9 @@ def list_history():
     total_count = query.count()
 
     # Apply pagination and ordering
-    history_records = query.order_by(
+    history_records = query.options(
+        selectinload(BackupHistory.job)
+    ).order_by(
         BackupHistory.started_at.desc()
     ).limit(limit).offset(offset).all()
 
@@ -104,7 +108,7 @@ def get_history_detail(history_id):
     Returns:
         JSON with full history record including logs
     """
-    record = BackupHistory.query.get_or_404(history_id)
+    record = BackupHistory.query.options(selectinload(BackupHistory.job)).get_or_404(history_id)
 
     # Calculate duration if completed
     duration_seconds = None
@@ -141,7 +145,7 @@ def get_history_logs(history_id):
     Returns:
         JSON with logs
     """
-    record = BackupHistory.query.get_or_404(history_id)
+    record = BackupHistory.query.options(selectinload(BackupHistory.job)).get_or_404(history_id)
 
     return jsonify({
         'id': record.id,
@@ -184,7 +188,9 @@ def get_history_summary():
     success_rate = round((success / completed * 100) if completed > 0 else 0, 1)
 
     # Get most recent backup
-    recent = BackupHistory.query.order_by(BackupHistory.started_at.desc()).first()
+    recent = BackupHistory.query.options(
+        selectinload(BackupHistory.job)
+    ).order_by(BackupHistory.started_at.desc()).first()
 
     recent_info = None
     if recent:
