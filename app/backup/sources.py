@@ -133,7 +133,7 @@ class LocalSource:
                                 try:
                                     size = file_path.stat().st_size
                                     self._log_file(str(file_path), size)
-                                except:
+                                except Exception:
                                     pass  # If stat fails, just skip logging
                         return ignored
 
@@ -285,7 +285,7 @@ class SSHSource:
             try:
                 stat = self.sftp_client.stat(remote_path)
                 self._log_file(remote_path, stat.st_size)
-            except:
+            except Exception:
                 pass  # If stat fails, just skip logging
 
             self.sftp_client.get(remote_path, local_path)
@@ -372,14 +372,14 @@ class SSHSource:
         if self.sftp_client:
             try:
                 self.sftp_client.close()
-            except:
+            except Exception:
                 pass
             self.sftp_client = None
 
         if self.ssh_client:
             try:
                 self.ssh_client.close()
-            except:
+            except Exception:
                 pass
             self.ssh_client = None
 

@@ -190,7 +190,7 @@ def sync_backup_jobs():
         try:
             scheduler.remove_job(leftover_id)
             print(f"Removed orphaned scheduled job: {leftover_id}")
-        except:
+        except Exception:
             pass
 
 

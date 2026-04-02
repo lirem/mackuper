@@ -72,7 +72,7 @@ def create_archive(
         if os.path.exists(archive_path):
             try:
                 os.remove(archive_path)
-            except:
+            except Exception:
                 pass
         raise CompressionError(f"Failed to create archive: {e}")
 

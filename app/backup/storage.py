@@ -179,7 +179,7 @@ class S3Storage:
                     Key=s3_key,
                     UploadId=upload_id
                 )
-            except:
+            except Exception:
                 pass
             raise e
 
