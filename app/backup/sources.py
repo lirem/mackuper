@@ -6,6 +6,7 @@ Supports:
 - SSHSource: Access files from remote systems via SSH/SFTP
 """
 
+import base64
 import os
 import shutil
 import tempfile
@@ -152,6 +153,21 @@ class LocalSource:
         pass
 
 
+class _VerifyHostKeyPolicy(paramiko.MissingHostKeyPolicy):
+    """Rejects SSH connections where the server key does not match the expected key."""
+
+    def __init__(self, expected_key_b64: str):
+        self._expected = expected_key_b64.strip()
+
+    def missing_host_key(self, client, hostname, key):
+        actual = base64.b64encode(key.asbytes()).decode()
+        if actual != self._expected:
+            raise paramiko.SSHException(
+                f"Host key mismatch for {hostname} (key type: {key.get_name()}): "
+                f"expected {self._expected[:20]}... got {actual[:20]}..."
+            )
+
+
 class SSHSource:
     """
     Handler for remote filesystem sources via SSH/SFTP.
@@ -172,6 +188,11 @@ class SSHSource:
                 - password: SSH password (optional if using key)
                 - private_key: Path to private key file (optional)
                 - paths: List of remote paths to backup
+                - host_key: Expected server public key, base64-encoded (optional).
+                    This is the base64 token from the second column of a known_hosts
+                    entry, e.g. from ``ssh-keyscan -t ed25519 <host> | awk '{print $3}'``.
+                    When set, connections are rejected if the server presents a different
+                    key. When omitted, all host keys are accepted (MITM risk).
         """
         self.host = config.get('host') or config.get('hostname')
         self.port = config.get('port', 22)
@@ -179,6 +200,7 @@ class SSHSource:
         self.password = config.get('password')
         self.private_key_path = config.get('private_key')
         self.paths = config.get('paths', [])
+        self.host_key = config.get('host_key')
 
         self.ssh_client = None
         self.sftp_client = None
@@ -211,7 +233,15 @@ class SSHSource:
         """
         try:
             self.ssh_client = SSHClient()
-            self.ssh_client.set_missing_host_key_policy(AutoAddPolicy())
+            if self.host_key:
+                self.ssh_client.set_missing_host_key_policy(_VerifyHostKeyPolicy(self.host_key))
+            else:
+                if self._log_callback:
+                    self._log_callback(
+                        "WARNING: SSH host key verification is disabled for this job. "
+                        "Configure 'host_key' in the source settings to enable MITM protection."
+                    )
+                self.ssh_client.set_missing_host_key_policy(AutoAddPolicy())
 
             # Prepare connection kwargs
             connect_kwargs = {
