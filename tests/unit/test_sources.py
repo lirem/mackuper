@@ -5,6 +5,7 @@ Tests LocalSource and SSHSource for acquiring backup files.
 """
 
 import os
+import shutil
 from pathlib import Path
 from unittest.mock import MagicMock, patch, mock_open
 
@@ -156,6 +157,117 @@ class TestLocalSource:
         acquired = source.acquire(str(dest_dir))
 
         assert len(acquired) == 1
+
+    def test_local_source_copies_symlink_as_symlink(self, tmp_path):
+        """Test that symlinks are preserved as symlinks, not dereferenced."""
+        source_dir = tmp_path / "source"
+        source_dir.mkdir()
+        real_file = source_dir / "real_file.txt"
+        real_file.write_text("content")
+        symlink = source_dir / "link_to_file.txt"
+        symlink.symlink_to("real_file.txt")
+
+        dest_dir = tmp_path / "dest"
+        dest_dir.mkdir()
+
+        source = LocalSource(paths=[str(source_dir)])
+        acquired = source.acquire(str(dest_dir))
+
+        dest_source = Path(acquired[0])
+        dest_link = dest_source / "link_to_file.txt"
+        assert dest_link.exists() or dest_link.is_symlink()
+        assert dest_link.is_symlink()
+        assert os.readlink(str(dest_link)) == "real_file.txt"
+
+    def test_local_source_dangling_symlink_does_not_abort_backup(self, tmp_path):
+        """Test that a dangling symlink does not abort backup.
+
+        With symlinks=True, shutil.copytree preserves the dangling symlink as-is
+        without raising shutil.Error. The symlink is copied as a symlink entry,
+        the real file is copied, and no warning is emitted.
+        """
+        source_dir = tmp_path / "source"
+        source_dir.mkdir()
+        real_file = source_dir / "important.txt"
+        real_file.write_text("must be backed up")
+        dangling = source_dir / "dangling_link.txt"
+        dangling.symlink_to("nonexistent_target.txt")
+
+        dest_dir = tmp_path / "dest"
+        dest_dir.mkdir()
+
+        log_messages = []
+        source = LocalSource(paths=[str(source_dir)])
+        source.set_log_callback(log_messages.append)
+
+        # Should not raise — dangling symlinks are preserved as symlink entries
+        acquired = source.acquire(str(dest_dir))
+
+        assert len(acquired) >= 1
+        dest_source = Path(acquired[0])
+        # The real file must have been copied
+        assert (dest_source / "important.txt").exists()
+        # The dangling symlink must be preserved as a symlink
+        dest_dangling = dest_source / "dangling_link.txt"
+        assert dest_dangling.is_symlink()
+        assert os.readlink(str(dest_dangling)) == "nonexistent_target.txt"
+
+    def test_local_source_shutil_error_partial_copy_warns_and_continues(self, tmp_path):
+        """Test that shutil.Error during copytree logs a warning and continues.
+
+        Exercises the shutil.Error handler: when copytree raises with partial failures,
+        the backup continues and the destination path is included if non-empty.
+        """
+        source_dir = tmp_path / "source"
+        source_dir.mkdir()
+        (source_dir / "file.txt").write_text("content")
+
+        dest_dir = tmp_path / "dest"
+        dest_dir.mkdir()
+
+        log_messages = []
+        source = LocalSource(paths=[str(source_dir)])
+        source.set_log_callback(log_messages.append)
+
+        with patch("app.backup.sources.shutil.copytree") as mock_copytree:
+            # Simulate copytree raising shutil.Error after partially creating dest
+            def side_effect(src, dst, **kwargs):
+                Path(dst).mkdir(parents=True, exist_ok=True)
+                (Path(dst) / "file.txt").write_text("content")
+                raise shutil.Error([("/src/bad.txt", "/dst/bad.txt", "permission denied")])
+            mock_copytree.side_effect = side_effect
+
+            acquired = source.acquire(str(dest_dir))
+
+        # Warning must have been logged
+        warning_msgs = [m for m in log_messages if "WARNING" in m]
+        assert len(warning_msgs) >= 1
+        assert any("1 file(s)" in m for m in warning_msgs)
+        # Destination with content must be included in acquired paths
+        assert len(acquired) == 1
+
+    def test_local_source_symlink_to_file_preserved(self, tmp_path):
+        """Test CLAUDE.md -> AGENTS.md pattern: both files end up in destination."""
+        source_dir = tmp_path / "source"
+        source_dir.mkdir()
+        agents = source_dir / "AGENTS.md"
+        agents.write_text("# Agents\ncontent here")
+        claude = source_dir / "CLAUDE.md"
+        claude.symlink_to("AGENTS.md")
+
+        dest_dir = tmp_path / "dest"
+        dest_dir.mkdir()
+
+        source = LocalSource(paths=[str(source_dir)])
+        acquired = source.acquire(str(dest_dir))
+
+        dest_source = Path(acquired[0])
+        dest_claude = dest_source / "CLAUDE.md"
+        dest_agents = dest_source / "AGENTS.md"
+
+        assert dest_agents.exists()
+        assert dest_claude.is_symlink()
+        assert os.readlink(str(dest_claude)) == "AGENTS.md"
 
 
 class TestSSHSource:

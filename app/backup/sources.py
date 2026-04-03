@@ -137,12 +137,29 @@ class LocalSource:
                                     pass  # If stat fails, just skip logging
                         return ignored
 
-                    shutil.copytree(source_path, dest_path, symlinks=False, ignore=ignore_patterns)
+                    shutil.copytree(source_path, dest_path, symlinks=True, ignore=ignore_patterns)
                     acquired_paths.append(str(dest_path))
                 else:
                     raise SourceError(f"Unsupported path type: {path}")
             except PermissionError as e:
                 raise SourceError(f"Permission denied accessing {path}: {e}")
+            except shutil.Error as e:
+                # shutil.Error contains a list of (src, dst, error) tuples for partial failures
+                errors = e.args[0] if e.args else []
+                failed_files = [str(err) for err in errors] if isinstance(errors, list) else [str(errors)]
+                failed_count = len(failed_files) if isinstance(errors, list) else 1
+                if self._log_callback:
+                    self._log_callback(
+                        f"WARNING: {failed_count} file(s) could not be copied from {path} "
+                        f"(skipped): {'; '.join(failed_files[:5])}"
+                    )
+                # Only count as acquired if something was actually copied
+                if dest_path.exists() and any(dest_path.iterdir()):
+                    acquired_paths.append(str(dest_path))
+                elif self._log_callback:
+                    self._log_callback(
+                        f"WARNING: No files were successfully copied from {path}, excluding from backup"
+                    )
             except Exception as e:
                 raise SourceError(f"Failed to copy {path}: {e}")
 
