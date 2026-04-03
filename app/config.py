@@ -60,8 +60,9 @@ class ProductionConfig(Config):
     DEBUG = False
     SQLALCHEMY_ECHO = False
 
-    # Production security
-    SESSION_COOKIE_SECURE = True
+    # Only mark session cookie as Secure when TLS terminates at this service.
+    # Set HTTPS_ENABLED=true when behind a TLS-terminating reverse proxy.
+    SESSION_COOKIE_SECURE = os.environ.get('HTTPS_ENABLED', 'false').lower() == 'true'
 
 
 # Configuration dictionary

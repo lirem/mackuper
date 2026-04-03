@@ -315,6 +315,99 @@ class TestAuthRoutes:
         location = response.headers.get('Location', '')
         assert 'login' in location
 
+    # ---- CSRF regression tests (run with CSRF enabled) ----
+
+    def _csrf_client(self, app):
+        """Return a test client with CSRF protection enabled and Secure cookie disabled."""
+        original_csrf = app.config.get('WTF_CSRF_ENABLED')
+        original_secure = app.config.get('SESSION_COOKIE_SECURE')
+        app.config['WTF_CSRF_ENABLED'] = True
+        app.config['SESSION_COOKIE_SECURE'] = False
+        client = app.test_client()
+        # Restore config after creating the client so it doesn't leak into other tests
+        app.config['WTF_CSRF_ENABLED'] = original_csrf
+        app.config['SESSION_COOKIE_SECURE'] = original_secure
+        return client
+
+    def test_session_cookie_not_secure_over_http(self, monkeypatch):
+        """ProductionConfig.SESSION_COOKIE_SECURE must be False when HTTPS_ENABLED is unset."""
+        monkeypatch.delenv('HTTPS_ENABLED', raising=False)
+        import importlib
+        from app import config as app_config
+        importlib.reload(app_config)
+        assert app_config.ProductionConfig.SESSION_COOKIE_SECURE is False, (
+            "SESSION_COOKIE_SECURE must default to False. "
+            "Setting it True over HTTP causes browsers to discard the session cookie, "
+            "which breaks CSRF token validation."
+        )
+
+    def test_session_cookie_secure_when_https_enabled(self, monkeypatch):
+        """ProductionConfig.SESSION_COOKIE_SECURE must be True when HTTPS_ENABLED=true."""
+        monkeypatch.setenv('HTTPS_ENABLED', 'true')
+        import importlib
+        from app import config as app_config
+        importlib.reload(app_config)
+        assert app_config.ProductionConfig.SESSION_COOKIE_SECURE is True, (
+            "SESSION_COOKIE_SECURE must be True when HTTPS_ENABLED=true."
+        )
+
+    def test_missing_csrf_token_returns_400(self, app, admin_user):
+        """A POST to /login without a CSRF token must return 400 when CSRF is enabled."""
+        csrf_client = self._csrf_client(app)
+        app.config['WTF_CSRF_ENABLED'] = True
+        app.config['SESSION_COOKIE_SECURE'] = False
+        try:
+            response = csrf_client.post(
+                '/login',
+                data={'username': 'admin', 'password': 'Admin123'},
+            )
+        finally:
+            app.config['WTF_CSRF_ENABLED'] = False
+            app.config['SESSION_COOKIE_SECURE'] = False
+        assert response.status_code == 400, (
+            f"Expected 400 CSRF error but got {response.status_code}. "
+            "CSRF protection may be misconfigured."
+        )
+
+    def test_csrf_token_round_trip(self, app, admin_user):
+        """A valid CSRF token from GET /login must be accepted on POST /login."""
+        import re
+        from app.models import EncryptionKey
+        from app.utils.crypto import crypto_manager
+
+        with app.app_context():
+            salt = crypto_manager.initialize('Admin123')
+            enc_key = EncryptionKey(key_encrypted=salt)
+            from app import db
+            db.session.add(enc_key)
+            db.session.commit()
+
+        csrf_client = self._csrf_client(app)
+        app.config['WTF_CSRF_ENABLED'] = True
+        app.config['SESSION_COOKIE_SECURE'] = False
+        try:
+            # Step 1: GET the login page to receive a session cookie + CSRF token in form
+            get_resp = csrf_client.get('/login')
+            assert get_resp.status_code == 200
+            html = get_resp.data.decode()
+            match = re.search(r'name="csrf_token"\s+value="([^"]+)"', html)
+            assert match, "CSRF token hidden field not found in login form"
+            token = match.group(1)
+
+            # Step 2: POST with valid CSRF token — must NOT return 400
+            post_resp = csrf_client.post(
+                '/login',
+                data={'username': 'admin', 'password': 'Admin123', 'csrf_token': token},
+                follow_redirects=False,
+            )
+        finally:
+            app.config['WTF_CSRF_ENABLED'] = False
+            app.config['SESSION_COOKIE_SECURE'] = False
+        assert post_resp.status_code != 400, (
+            "POST with valid CSRF token returned 400. "
+            "This likely means the session cookie was not stored (SESSION_COOKIE_SECURE bug)."
+        )
+
 
 # ---------------------------------------------------------------------------
 # Dashboard routes  (/api/dashboard/*)

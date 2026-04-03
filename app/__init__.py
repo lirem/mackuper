@@ -106,6 +106,11 @@ def create_app(config_name=None):
     login_manager.init_app(app)
     csrf.init_app(app)
 
+    # When TLS is terminated by a reverse proxy, trust forwarded headers
+    if app.config.get('SESSION_COOKIE_SECURE'):
+        from werkzeug.middleware.proxy_fix import ProxyFix
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
+
     # Enable SQLite WAL mode for concurrent read/write access
     from sqlalchemy import event
     from sqlalchemy.engine import Engine
