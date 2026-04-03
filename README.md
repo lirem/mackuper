@@ -1,6 +1,6 @@
 # Mackuper
 
-**Docker-based backup solution for AWS S3** - Simple, reliable, and resource-efficient backup management with a clean web interface.
+**Mackuper is a Docker-based backup solution for backing up local and remote (SSH) files/directories to AWS S3.** Designed for simplicity, reliability, and resource efficiency.
 
 ![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.11+-blue.svg)
