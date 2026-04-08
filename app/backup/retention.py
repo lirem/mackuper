@@ -129,8 +129,17 @@ class RetentionManager:
 
         # Decrypt credentials
         if not crypto_manager.is_initialized:
-            self._log("Crypto manager not initialized, skipping S3 cleanup")
-            return 0
+            self._log("Crypto manager not initialized, attempting recovery...")
+            try:
+                from app import _reinit_crypto_from_stored
+                recovered = _reinit_crypto_from_stored()
+            except Exception as e:
+                self._log(f"Crypto manager recovery error: {e}")
+                return 0
+            if not recovered:
+                self._log("Crypto manager recovery failed, skipping S3 cleanup")
+                return 0
+            self._log("Crypto manager recovered successfully")
 
         access_key = crypto_manager.decrypt(aws_settings.access_key_encrypted)
         secret_key = crypto_manager.decrypt(aws_settings.secret_key_encrypted)
@@ -148,7 +157,7 @@ class RetentionManager:
 
         # List all objects with job name prefix
         try:
-            objects = s3_storage.list_objects(prefix=job.name)
+            objects = s3_storage.list_objects(prefix=f"{job.name}/")
         except StorageError as e:
             self._log(f"Failed to list S3 objects: {e}")
             return 0

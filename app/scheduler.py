@@ -87,7 +87,7 @@ def init_scheduler(app):
 
     # Add retention policy job (runs daily at 2 AM UTC)
     scheduler.add_job(
-        func=enforce_retention_policies,
+        func=_execute_retention_wrapper,
         trigger=CronTrigger(hour=2, minute=0),
         id='retention_cleanup',
         name='Daily Retention Cleanup',
@@ -293,6 +293,39 @@ def _execute_backup_wrapper(job_id: int, allow_disabled: bool = False):
             print(f"Backup job {job_id} completed with status: {history.status}")
         except Exception as e:
             print(f"Scheduler backup job {job_id} failed: {e}")
+
+
+def _execute_retention_wrapper():
+    """
+    Wrapper for enforce_retention_policies in APScheduler context.
+
+    Ensures the function runs within a Flask app context, which is required
+    for database access and decrypting credentials. Matches the pattern used
+    by _execute_backup_wrapper for scheduled backup jobs.
+    """
+    global flask_app
+
+    if flask_app is None:
+        print("Retention wrapper: flask_app is not set, skipping")
+        return
+
+    with flask_app.app_context():
+        try:
+            result = enforce_retention_policies()
+            errors = result.get('errors', [])
+            if errors:
+                flask_app.logger.error(
+                    f"Retention cleanup completed with {len(errors)} error(s): {errors}"
+                )
+            else:
+                flask_app.logger.info(
+                    f"Retention cleanup complete. "
+                    f"Jobs: {result.get('jobs_processed', 0)}, "
+                    f"S3 deleted: {result.get('s3_deleted', 0)}, "
+                    f"Local deleted: {result.get('local_deleted', 0)}"
+                )
+        except Exception as e:
+            flask_app.logger.error(f"Retention cleanup failed with unexpected error: {e}")
 
 
 def trigger_backup_now(job_id: int):

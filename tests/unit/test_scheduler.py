@@ -422,6 +422,121 @@ class TestExecuteBackupWrapper:
         scheduler_module._execute_backup_wrapper(123)
 
 
+class TestExecuteRetentionWrapper:
+    """Test retention policy execution wrapper."""
+
+    def setup_method(self):
+        """Set up before each test."""
+        self.mock_app = MagicMock()
+        scheduler_module.flask_app = self.mock_app
+
+    def teardown_method(self):
+        """Clean up after each test."""
+        scheduler_module.flask_app = None
+
+    @patch('app.scheduler.enforce_retention_policies')
+    def test_retention_wrapper_calls_enforce_with_app_context(self, mock_enforce):
+        """Test wrapper calls enforce_retention_policies inside an app context."""
+        mock_enforce.return_value = {
+            'jobs_processed': 1,
+            's3_deleted': 0,
+            'local_deleted': 0,
+            'errors': [],
+        }
+
+        scheduler_module._execute_retention_wrapper()
+
+        self.mock_app.app_context.assert_called_once()
+        mock_enforce.assert_called_once()
+
+    @patch('app.scheduler.enforce_retention_policies')
+    def test_retention_wrapper_logs_success(self, mock_enforce):
+        """Test wrapper logs an info summary when there are no errors."""
+        mock_enforce.return_value = {
+            'jobs_processed': 2,
+            's3_deleted': 3,
+            'local_deleted': 1,
+            'errors': [],
+        }
+
+        scheduler_module._execute_retention_wrapper()
+
+        self.mock_app.logger.info.assert_called_once()
+        log_message = self.mock_app.logger.info.call_args[0][0]
+        assert '2' in log_message   # jobs_processed
+        assert '3' in log_message   # s3_deleted
+        assert '1' in log_message   # local_deleted
+        self.mock_app.logger.error.assert_not_called()
+
+    @patch('app.scheduler.enforce_retention_policies')
+    def test_retention_wrapper_logs_errors(self, mock_enforce):
+        """Test wrapper logs an error when retention returns errors."""
+        mock_enforce.return_value = {
+            'jobs_processed': 1,
+            's3_deleted': 0,
+            'local_deleted': 0,
+            'errors': ['job foo failed'],
+        }
+
+        scheduler_module._execute_retention_wrapper()
+
+        self.mock_app.logger.error.assert_called_once()
+        error_message = self.mock_app.logger.error.call_args[0][0]
+        assert 'job foo failed' in error_message
+
+    @patch('app.scheduler.enforce_retention_policies')
+    def test_retention_wrapper_handles_unexpected_exception(self, mock_enforce):
+        """Test wrapper does not raise on unexpected exception and logs error."""
+        mock_enforce.side_effect = RuntimeError("db error")
+
+        # Must not raise
+        scheduler_module._execute_retention_wrapper()
+
+        self.mock_app.logger.error.assert_called_once()
+        error_message = self.mock_app.logger.error.call_args[0][0]
+        assert 'db error' in error_message
+
+    @patch('app.scheduler.enforce_retention_policies')
+    def test_retention_wrapper_skips_when_flask_app_none(self, mock_enforce):
+        """Test wrapper returns early without error when flask_app is None."""
+        scheduler_module.flask_app = None
+
+        scheduler_module._execute_retention_wrapper()
+
+        mock_enforce.assert_not_called()
+
+    @patch('app.scheduler.BackgroundScheduler')
+    def test_init_scheduler_registers_retention_wrapper(self, mock_scheduler_class):
+        """Regression: init_scheduler must register _execute_retention_wrapper, not enforce_retention_policies directly."""
+        # Reset global scheduler so init_scheduler runs fully
+        scheduler_module.scheduler = None
+
+        mock_sched = MagicMock()
+        mock_scheduler_class.return_value = mock_sched
+
+        # Use a plain MagicMock as the Flask app — avoids the DB bootstrap
+        # that the real `app` fixture triggers during create_app().
+        mock_app = MagicMock()
+        mock_app.config = {'SQLALCHEMY_DATABASE_URI': 'sqlite:///:memory:'}
+
+        scheduler_module.init_scheduler(mock_app)
+
+        # Find the add_job call for the retention job
+        retention_calls = [
+            c for c in mock_sched.add_job.call_args_list
+            if c[1].get('id') == 'retention_cleanup'
+        ]
+        assert len(retention_calls) == 1, "Expected exactly one add_job call for 'retention_cleanup'"
+        registered_func = retention_calls[0][1].get('func') or retention_calls[0][0][0]
+        assert registered_func is scheduler_module._execute_retention_wrapper, (
+            "Retention job must use _execute_retention_wrapper, not enforce_retention_policies directly"
+        )
+
+        # Cleanup
+        scheduler_module.scheduler = None
+        scheduler_module.flask_app = None
+
+
 class TestSchedulerStatusDatabaseFallback:
     """Test scheduler status detection with database fallback."""
 

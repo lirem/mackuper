@@ -482,3 +482,212 @@ class TestRetentionTimezoneRegression:
 
         assert result['s3_deleted'] == 1
         mock_s3_instance.delete.assert_called_once_with(just_past_cutoff_key)
+
+
+class TestCleanupS3CryptoRecovery:
+    """
+    Tests for Fix 2: crypto_manager recovery path in _cleanup_s3.
+
+    When crypto_manager.is_initialized is False, _cleanup_s3 must attempt
+    recovery via _reinit_crypto_from_stored() before giving up.
+    """
+
+    def _make_job(self, name='test_job', retention_s3_days=7):
+        """Create a minimal BackupJob-like mock (no DB required)."""
+        job = MagicMock(spec=['id', 'name', 'retention_s3_days', 'retention_local_days'])
+        job.id = 1
+        job.name = name
+        job.retention_s3_days = retention_s3_days
+        job.retention_local_days = None
+        return job
+
+    def _make_aws_settings(self):
+        aws = MagicMock()
+        aws.access_key_encrypted = 'enc_access'
+        aws.secret_key_encrypted = 'enc_secret'
+        aws.bucket_name = 'test-bucket'
+        aws.region = 'us-east-1'
+        return aws
+
+    @patch('app.backup.retention.BackupHistory')
+    @patch('app.backup.retention.S3Storage')
+    @patch('app.backup.retention.LocalStorage')
+    @patch('app.backup.retention.AWSSettings')
+    @patch('app.backup.retention.crypto_manager')
+    def test_cleanup_s3_attempts_crypto_recovery_when_not_initialized(
+        self, mock_cm, mock_aws_cls, mock_local_storage, mock_s3_storage, mock_history
+    ):
+        """When crypto_manager is not initialized, _cleanup_s3 should attempt recovery."""
+        mock_cm.is_initialized = False
+        mock_aws_cls.query.first.return_value = self._make_aws_settings()
+        mock_history.query.filter_by.return_value.first.return_value = None
+
+        mock_s3_instance = MagicMock()
+        mock_s3_storage.return_value = mock_s3_instance
+        mock_s3_instance.list_objects.return_value = []
+        mock_local_storage.return_value = MagicMock()
+
+        # Recovery succeeds and crypto_manager becomes initialized after recovery
+        mock_cm.decrypt.side_effect = lambda v: 'decrypted_' + v
+
+        with patch('app.backup.retention.crypto_manager', mock_cm), \
+             patch('app.backup.retention.AWSSettings', mock_aws_cls):
+            # Patch _reinit_crypto_from_stored at the module where it is imported
+            with patch('app.backup.retention.crypto_manager') as patched_cm, \
+                 patch('app.backup.retention.AWSSettings') as patched_aws:
+                patched_cm.is_initialized = False
+                patched_cm.decrypt.side_effect = lambda v: 'decrypted_' + v
+                patched_aws.query.first.return_value = self._make_aws_settings()
+
+                with patch('app._reinit_crypto_from_stored', return_value=True) as mock_reinit:
+                    job = self._make_job()
+                    manager = RetentionManager()
+                    result = manager.enforce_job_policy(job)
+
+                    mock_reinit.assert_called_once()
+                    # list_objects was reached (not short-circuited before S3 call)
+                    mock_s3_storage.assert_called()
+
+    @patch('app.backup.retention.BackupHistory')
+    @patch('app.backup.retention.S3Storage')
+    @patch('app.backup.retention.LocalStorage')
+    @patch('app.backup.retention.AWSSettings')
+    @patch('app.backup.retention.crypto_manager')
+    def test_cleanup_s3_skips_when_crypto_recovery_fails(
+        self, mock_cm, mock_aws_cls, mock_local_storage, mock_s3_storage, mock_history
+    ):
+        """When _reinit_crypto_from_stored returns False, _cleanup_s3 returns 0 without S3 calls."""
+        mock_cm.is_initialized = False
+        mock_aws_cls.query.first.return_value = self._make_aws_settings()
+        mock_history.query.filter_by.return_value.first.return_value = None
+        mock_local_storage.return_value = MagicMock()
+
+        with patch('app._reinit_crypto_from_stored', return_value=False):
+            job = self._make_job()
+            manager = RetentionManager()
+            result = manager.enforce_job_policy(job)
+
+        assert result['s3_deleted'] == 0
+        mock_s3_storage.assert_not_called()
+
+    @patch('app.backup.retention.BackupHistory')
+    @patch('app.backup.retention.S3Storage')
+    @patch('app.backup.retention.LocalStorage')
+    @patch('app.backup.retention.AWSSettings')
+    @patch('app.backup.retention.crypto_manager')
+    def test_cleanup_s3_skips_when_crypto_recovery_raises(
+        self, mock_cm, mock_aws_cls, mock_local_storage, mock_s3_storage, mock_history
+    ):
+        """When _reinit_crypto_from_stored raises, _cleanup_s3 returns 0 without S3 calls."""
+        mock_cm.is_initialized = False
+        mock_aws_cls.query.first.return_value = self._make_aws_settings()
+        mock_history.query.filter_by.return_value.first.return_value = None
+        mock_local_storage.return_value = MagicMock()
+
+        with patch('app._reinit_crypto_from_stored', side_effect=Exception("import error")):
+            job = self._make_job()
+            manager = RetentionManager()
+            result = manager.enforce_job_policy(job)
+
+        assert result['s3_deleted'] == 0
+        mock_s3_storage.assert_not_called()
+
+
+class TestCleanupS3Prefix:
+    """
+    Tests for Fix 3: S3 listing prefix must be f"{job.name}/" (with trailing slash).
+
+    This prevents a job named "backup" from accidentally matching objects
+    belonging to a job named "backup-extra".
+    """
+
+    def _make_job(self, name='myjob', retention_s3_days=7):
+        job = MagicMock(spec=['id', 'name', 'retention_s3_days', 'retention_local_days'])
+        job.id = 1
+        job.name = name
+        job.retention_s3_days = retention_s3_days
+        job.retention_local_days = None
+        return job
+
+    def _make_aws_settings(self):
+        aws = MagicMock()
+        aws.access_key_encrypted = 'enc_access'
+        aws.secret_key_encrypted = 'enc_secret'
+        aws.bucket_name = 'test-bucket'
+        aws.region = 'us-east-1'
+        return aws
+
+    @patch('app.backup.retention.BackupHistory')
+    @patch('app.backup.retention.S3Storage')
+    @patch('app.backup.retention.LocalStorage')
+    @patch('app.backup.retention.AWSSettings')
+    @patch('app.backup.retention.crypto_manager')
+    def test_cleanup_s3_uses_trailing_slash_prefix(
+        self, mock_cm, mock_aws_cls, mock_local_storage, mock_s3_storage, mock_history
+    ):
+        """S3 list_objects must be called with prefix f'{job.name}/' (trailing slash)."""
+        mock_cm.is_initialized = True
+        mock_cm.decrypt.side_effect = lambda v: 'decrypted_' + v
+        mock_aws_cls.query.first.return_value = self._make_aws_settings()
+        mock_history.query.filter_by.return_value.first.return_value = None
+
+        mock_s3_instance = MagicMock()
+        mock_s3_storage.return_value = mock_s3_instance
+        mock_s3_instance.list_objects.return_value = []
+        mock_local_storage.return_value = MagicMock()
+
+        job = self._make_job(name='myjob')
+        manager = RetentionManager()
+        manager.enforce_job_policy(job)
+
+        mock_s3_instance.list_objects.assert_called_once()
+        call_kwargs = mock_s3_instance.list_objects.call_args
+        # Prefix can arrive as positional or keyword arg
+        prefix_used = call_kwargs[1].get('prefix') if call_kwargs[1] else call_kwargs[0][0]
+        assert prefix_used == 'myjob/', (
+            f"Expected prefix 'myjob/' but got '{prefix_used}'"
+        )
+
+    @patch('app.backup.retention.BackupHistory')
+    @patch('app.backup.retention.S3Storage')
+    @patch('app.backup.retention.LocalStorage')
+    @patch('app.backup.retention.AWSSettings')
+    @patch('app.backup.retention.crypto_manager')
+    def test_cleanup_s3_prefix_does_not_match_other_jobs(
+        self, mock_cm, mock_aws_cls, mock_local_storage, mock_s3_storage, mock_history
+    ):
+        """
+        Regression: prefix 'backup/' must not match objects under 'backup-extra/'.
+
+        Simulate two separate _cleanup_s3 invocations (one per job) and assert
+        that each call uses the correct isolated prefix.
+        """
+        mock_cm.is_initialized = True
+        mock_cm.decrypt.side_effect = lambda v: 'decrypted_' + v
+        mock_aws_cls.query.first.return_value = self._make_aws_settings()
+        mock_history.query.filter_by.return_value.first.return_value = None
+        mock_local_storage.return_value = MagicMock()
+
+        mock_s3_instance = MagicMock()
+        mock_s3_storage.return_value = mock_s3_instance
+        mock_s3_instance.list_objects.return_value = []
+
+        job_backup = self._make_job(name='backup')
+        job_backup_extra = self._make_job(name='backup-extra')
+        job_backup_extra.id = 2
+
+        manager = RetentionManager()
+        manager.enforce_job_policy(job_backup)
+        manager.enforce_job_policy(job_backup_extra)
+
+        # Collect all prefix arguments used across both calls
+        prefixes_used = [
+            c[1].get('prefix') if c[1] else c[0][0]
+            for c in mock_s3_instance.list_objects.call_args_list
+        ]
+        assert 'backup/' in prefixes_used, "Expected 'backup/' prefix for the 'backup' job"
+        assert 'backup-extra/' in prefixes_used, "Expected 'backup-extra/' prefix for the 'backup-extra' job"
+        # Neither call should use the bare name without slash
+        assert 'backup' not in prefixes_used, (
+            "Bare 'backup' prefix (without slash) must not be used — it would match 'backup-extra/' objects"
+        )
