@@ -1,3 +1,121 @@
+// Cron expression validator — mirrors APScheduler 3.10.4 CronTrigger.from_crontab() grammar.
+// Source: apscheduler/triggers/cron/fields.py + expressions.py
+// Update this function if APScheduler is upgraded.
+function validateCronExpression(expr) {
+    if (!expr || !expr.trim()) return 'Cron expression is required';
+
+    const fields = expr.trim().split(/\s+/);
+    if (fields.length !== 5) {
+        return `Wrong number of fields; got ${fields.length}, expected 5`;
+    }
+
+    const FIELD_DEFS = [
+        { name: 'minute',      min: 0,  max: 59, names: null },
+        { name: 'hour',        min: 0,  max: 23, names: null },
+        { name: 'day',         min: 1,  max: 31, names: null, allowLast: true },
+        { name: 'month',       min: 1,  max: 12, names: {jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12} },
+        { name: 'day_of_week', min: 0,  max: 6,  names: {mon:0,tue:1,wed:2,thu:3,fri:4,sat:5,sun:6} },
+    ];
+
+    for (let i = 0; i < 5; i++) {
+        const error = validateCronField(fields[i], FIELD_DEFS[i]);
+        if (error) return `Field "${FIELD_DEFS[i].name}": ${error}`;
+    }
+    return null;
+}
+
+function parseCronValue(token, field) {
+    const lower = token.toLowerCase();
+    if (field.names && lower in field.names) return field.names[lower];
+    if (/^\d+$/.test(token)) return parseInt(token, 10);
+    return NaN;
+}
+
+function validateCronField(fieldStr, field) {
+    const tokens = fieldStr.split(',');
+    for (const token of tokens) {
+        const error = validateCronToken(token.trim(), field);
+        if (error) return error;
+    }
+    return null;
+}
+
+function validateCronToken(token, field) {
+    // AllExpression: * or */N
+    if (token === '*') return null;
+    if (/^\*\/(\d+)$/.test(token)) {
+        const step = parseInt(token.slice(2), 10);
+        if (step === 0) return 'Increment must be higher than 0';
+        const rangeSize = field.max - field.min;
+        if (step > rangeSize) return `Step value (${step}) is higher than the total range (${rangeSize})`;
+        return null;
+    }
+
+    // last keyword (day field only)
+    if (token.toLowerCase() === 'last') {
+        if (!field.allowLast) return `Unrecognized expression "${token}"`;
+        return null;
+    }
+
+    // RangeExpression: N, N-M, N/step, N-M/step
+    let base = token, step = null;
+    const slashIdx = token.indexOf('/');
+    if (slashIdx !== -1) {
+        base = token.slice(0, slashIdx);
+        const stepStr = token.slice(slashIdx + 1);
+        if (!/^\d+$/.test(stepStr)) return `Unrecognized expression "${token}"`;
+        step = parseInt(stepStr, 10);
+        if (step === 0) return 'Increment must be higher than 0';
+    }
+
+    // Parse base: N or N-M
+    const dashIdx = base.indexOf('-');
+    let first, last;
+    if (dashIdx !== -1) {
+        const firstStr = base.slice(0, dashIdx);
+        const lastStr = base.slice(dashIdx + 1);
+        first = parseCronValue(firstStr, field);
+        last = parseCronValue(lastStr, field);
+        if (isNaN(first)) return `Unrecognized expression "${firstStr}"`;
+        if (isNaN(last)) return `Unrecognized expression "${lastStr}"`;
+        // Reject numeric-to-name ranges (e.g. "0-mon"), but name-to-numeric (e.g. "mon-5") is valid
+        const firstIsName = !!(field.names && firstStr.toLowerCase() in field.names);
+        const lastIsName = !!(field.names && lastStr.toLowerCase() in field.names);
+        if (!firstIsName && lastIsName) return `Cannot mix named and numeric values in range "${token}"`;
+    } else {
+        first = parseCronValue(base, field);
+        last = null;
+        if (isNaN(first)) return `Unrecognized expression "${base}"`;
+    }
+
+    // Validate range bounds
+    if (first < field.min) return `Value ${first} is lower than the minimum value (${field.min})`;
+    if (last !== null) {
+        if (last > field.max) return `Value ${last} is higher than the maximum value (${field.max})`;
+        if (first > last) return `The minimum value in a range must not be higher than the maximum`;
+    } else {
+        if (first > field.max) return `Value ${first} is higher than the maximum value (${field.max})`;
+    }
+
+    // Validate step against range (N-M/step uses last-first, N/step uses max-first)
+    if (step !== null) {
+        const rangeSize = last !== null ? (last - first) : (field.max - first);
+        if (step > rangeSize) return `Step value (${step}) is higher than the total range of the expression (${rangeSize})`;
+    }
+
+    return null;
+}
+
+function onCronInput(input) {
+    const error = validateCronExpression(input.value);
+    const errorEl = document.getElementById('cronError');
+    const saveBtn = document.getElementById('saveJobBtn');
+
+    input.classList.toggle('form-input--error', !!error);
+    if (errorEl) { errorEl.textContent = error || ''; errorEl.style.display = error ? '' : 'none'; }
+    if (saveBtn) saveBtn.disabled = !!error;
+}
+
 // Jobs management component
 let jobsState = {
     jobs: [],
@@ -151,6 +269,14 @@ function openJobModal(job = null) {
     const modal = document.getElementById('jobModal');
     const content = document.getElementById('jobModalContent');
     content.innerHTML = renderJobForm();
+
+    // Wire cron live validator
+    const cronInputEl = document.getElementById('cronInput');
+    if (cronInputEl) {
+        cronInputEl.addEventListener('input', function() { onCronInput(this); });
+        onCronInput(cronInputEl); // validate initial value immediately
+    }
+
     modal.classList.remove('hidden');
 }
 
@@ -208,8 +334,10 @@ function renderJobForm() {
             <!-- Schedule -->
             <div>
                 <label class="form-label">Schedule (Cron) *</label>
-                <input type="text" class="form-input" name="schedule_cron" value="${escapeHtml(formData.schedule_cron)}" required>
+                <input type="text" id="cronInput" class="form-input" name="schedule_cron"
+                       value="${escapeHtml(formData.schedule_cron)}" required>
                 <p class="cron-help">Examples: "0 2 * * *" (daily 2 AM), "0 */6 * * *" (every 6 hours)</p>
+                <p id="cronError" class="text-xs text-red-500 mt-1" style="display:none;"></p>
             </div>
 
             <!-- Retention -->
@@ -238,7 +366,7 @@ function renderJobForm() {
 
             <!-- Actions -->
             <div class="flex gap-3 pt-4">
-                <button type="submit" class="btn-primary flex-1">
+                <button type="submit" id="saveJobBtn" class="btn-primary flex-1">
                     ${isEdit ? 'Update' : 'Create'} Job
                 </button>
                 <button type="button" onclick="closeJobModal()" class="btn-secondary flex-1">
@@ -316,6 +444,14 @@ function updateSourceType(type) {
 
 async function saveJob(event) {
     event.preventDefault();
+
+    // Safety guard: block submission if cron is invalid (button should already be disabled)
+    const cronInputEl = document.getElementById('cronInput');
+    if (cronInputEl) {
+        const cronError = validateCronExpression(cronInputEl.value);
+        if (cronError) return;
+    }
+
     const formData = new FormData(event.target);
     const isEdit = jobsState.editingJob !== null;
 
@@ -375,7 +511,13 @@ async function saveJob(event) {
         closeJobModal();
         app.refreshJobs();
     } catch (error) {
-        alert('Error: ' + error.message);
+        const appRoot = document.querySelector('[x-data]');
+        const app = appRoot ? Alpine.$data(appRoot) : null;
+        if (app) {
+            app.showToast(error.message, 'error');
+        } else {
+            alert('Error: ' + error.message);
+        }
     }
 }
 

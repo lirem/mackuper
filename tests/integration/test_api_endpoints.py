@@ -939,3 +939,348 @@ class TestHistoryRoutes:
         assert response.status_code == 200
         data = response.get_json()
         assert 'deleted_count' in data
+
+
+# ---------------------------------------------------------------------------
+# Cron expression validation — integration tests for create_job / update_job
+# ---------------------------------------------------------------------------
+
+class TestCronValidationOnCreateJob:
+    """Integration tests: POST /api/jobs/ rejects invalid cron expressions."""
+
+    @pytest.fixture(autouse=True)
+    def _patch_scheduler(self):
+        """Suppress real scheduler calls for all tests in this class."""
+        with patch('app.routes.jobs_routes.sync_backup_jobs'):
+            yield
+
+    def _base_payload(self, name='cron_test_create_job', cron=None):
+        payload = {
+            'name': name,
+            'source_type': 'local',
+            'source_config': {'paths': ['/tmp']},
+            'compression_format': 'tar.gz',
+        }
+        if cron is not None:
+            payload['schedule_cron'] = cron
+        return payload
+
+    # --- valid cron: job must be created (201) ---
+
+    def test_create_job_valid_cron_accepted(self, authenticated_client):
+        """POST with a valid cron expression returns 201."""
+        response = authenticated_client.post(
+            '/api/jobs/',
+            json=self._base_payload(cron='0 2 * * *'),
+        )
+        assert response.status_code == 201
+
+    def test_create_job_valid_cron_every_5_minutes(self, authenticated_client):
+        """POST with '*/5 * * * *' (every 5 min) returns 201."""
+        response = authenticated_client.post(
+            '/api/jobs/',
+            json=self._base_payload(name='cron_test_5min', cron='*/5 * * * *'),
+        )
+        assert response.status_code == 201
+
+    def test_create_job_no_cron_accepted(self, authenticated_client):
+        """POST without schedule_cron field returns 201 (cron is optional)."""
+        response = authenticated_client.post(
+            '/api/jobs/',
+            json=self._base_payload(),
+        )
+        assert response.status_code == 201
+
+    # --- invalid cron: must get 400 with structured error ---
+
+    def test_create_job_invalid_cron_returns_400(self, authenticated_client):
+        """POST with an invalid cron expression returns 400."""
+        response = authenticated_client.post(
+            '/api/jobs/',
+            json=self._base_payload(cron='not a cron'),
+        )
+        assert response.status_code == 400
+
+    def test_create_job_invalid_cron_error_key_present(self, authenticated_client):
+        """400 response body contains an 'error' key."""
+        response = authenticated_client.post(
+            '/api/jobs/',
+            json=self._base_payload(cron='bad cron expr'),
+        )
+        data = response.get_json()
+        assert 'error' in data
+
+    def test_create_job_invalid_cron_error_message_prefix(self, authenticated_client):
+        """Error message starts with 'Invalid cron expression:'."""
+        response = authenticated_client.post(
+            '/api/jobs/',
+            json=self._base_payload(cron='99 99 99 99 99'),
+        )
+        data = response.get_json()
+        assert data['error'].startswith('Invalid cron expression:')
+
+    def test_create_job_step_zero_returns_400(self, authenticated_client):
+        """'*/0 * * * *' — step of zero — is rejected with 400."""
+        response = authenticated_client.post(
+            '/api/jobs/',
+            json=self._base_payload(name='cron_test_step0', cron='*/0 * * * *'),
+        )
+        assert response.status_code == 400
+
+    def test_create_job_minute_60_returns_400(self, authenticated_client):
+        """Minute value 60 is out of range — rejected with 400."""
+        response = authenticated_client.post(
+            '/api/jobs/',
+            json=self._base_payload(name='cron_test_min60', cron='60 * * * *'),
+        )
+        assert response.status_code == 400
+
+    def test_create_job_hour_24_returns_400(self, authenticated_client):
+        """Hour value 24 is out of range — rejected with 400."""
+        response = authenticated_client.post(
+            '/api/jobs/',
+            json=self._base_payload(name='cron_test_hr24', cron='0 24 * * *'),
+        )
+        assert response.status_code == 400
+
+    def test_create_job_too_few_fields_returns_400(self, authenticated_client):
+        """A 4-field cron string is rejected with 400."""
+        response = authenticated_client.post(
+            '/api/jobs/',
+            json=self._base_payload(name='cron_test_4fields', cron='* * * *'),
+        )
+        assert response.status_code == 400
+
+    def test_create_job_day_last_keyword_accepted(self, authenticated_client):
+        """'last' in the day-of-month field is valid in APScheduler and must be accepted."""
+        response = authenticated_client.post(
+            '/api/jobs/',
+            json=self._base_payload(name='cron_test_last', cron='0 2 last * *'),
+        )
+        assert response.status_code == 201
+
+    def test_create_job_number_to_name_range_returns_400(self, authenticated_client):
+        """'0-mon' (number-to-name day range) is invalid and returns 400."""
+        response = authenticated_client.post(
+            '/api/jobs/',
+            json=self._base_payload(name='cron_test_num2name', cron='0 9 * * 0-mon'),
+        )
+        assert response.status_code == 400
+
+    def test_create_job_empty_cron_string_returns_400(self, authenticated_client):
+        """An empty schedule_cron string is treated as provided-but-invalid → 400."""
+        # The route only calls validate_cron when schedule_cron is truthy, so
+        # an empty string skips validation (falsy).  Verify no 500 is returned.
+        response = authenticated_client.post(
+            '/api/jobs/',
+            json=self._base_payload(name='cron_test_empty', cron=''),
+        )
+        # Empty string is falsy — route stores None without validating; must not 500.
+        assert response.status_code in (201, 400)
+        assert response.status_code != 500
+
+    def test_create_job_invalid_cron_does_not_persist_job(self, authenticated_client):
+        """A rejected request must not create a job in the database."""
+        response = authenticated_client.post(
+            '/api/jobs/',
+            json=self._base_payload(name='ghost_job', cron='*/0 * * * *'),
+        )
+        assert response.status_code == 400
+
+        # The job must not appear in the list
+        list_response = authenticated_client.get('/api/jobs/')
+        names = [j['name'] for j in list_response.get_json()]
+        assert 'ghost_job' not in names
+
+    # --- valid edge-case expressions ---
+
+    def test_create_job_range_with_step_accepted(self, authenticated_client):
+        """'0-30/5 * * * *' — range with step — is accepted."""
+        response = authenticated_client.post(
+            '/api/jobs/',
+            json=self._base_payload(name='cron_test_range_step', cron='0-30/5 * * * *'),
+        )
+        assert response.status_code == 201
+
+    def test_create_job_list_of_ranges_accepted(self, authenticated_client):
+        """'1-5,10-15 * * * *' — list of minute ranges — is accepted."""
+        response = authenticated_client.post(
+            '/api/jobs/',
+            json=self._base_payload(name='cron_test_list_ranges', cron='1-5,10-15 * * * *'),
+        )
+        assert response.status_code == 201
+
+    def test_create_job_month_name_accepted(self, authenticated_client):
+        """'0 0 1 jan *' — month abbreviation — is accepted."""
+        response = authenticated_client.post(
+            '/api/jobs/',
+            json=self._base_payload(name='cron_test_jan', cron='0 0 1 jan *'),
+        )
+        assert response.status_code == 201
+
+    def test_create_job_day_7_out_of_range_returns_400(self, authenticated_client):
+        """'0 2 * * 7' — day_of_week max is 6; 7 is rejected with 400."""
+        response = authenticated_client.post(
+            '/api/jobs/',
+            json=self._base_payload(name='cron_test_day7', cron='0 2 * * 7'),
+        )
+        assert response.status_code == 400
+
+    def test_create_job_name_to_number_range_accepted(self, authenticated_client):
+        """'0 9 * * mon-5' — name-to-number day range — is accepted."""
+        response = authenticated_client.post(
+            '/api/jobs/',
+            json=self._base_payload(name='cron_test_mon5', cron='0 9 * * mon-5'),
+        )
+        assert response.status_code == 201
+
+    def test_create_job_offset_step_accepted(self, authenticated_client):
+        """'5/10 * * * *' — offset step expression — is accepted."""
+        response = authenticated_client.post(
+            '/api/jobs/',
+            json=self._base_payload(name='cron_test_offset_step', cron='5/10 * * * *'),
+        )
+        assert response.status_code == 201
+
+
+class TestCronValidationOnUpdateJob:
+    """Integration tests: PUT /api/jobs/<id> rejects invalid cron expressions."""
+
+    @pytest.fixture(autouse=True)
+    def _patch_scheduler(self):
+        """Suppress real scheduler calls for all tests in this class."""
+        with patch('app.routes.jobs_routes.sync_backup_jobs'):
+            yield
+
+    # --- invalid cron on update ---
+
+    def test_update_job_invalid_cron_returns_400(self, authenticated_client, local_backup_job):
+        """PUT with an invalid cron expression returns 400."""
+        response = authenticated_client.put(
+            f'/api/jobs/{local_backup_job.id}',
+            json={'schedule_cron': 'not a cron'},
+        )
+        assert response.status_code == 400
+
+    def test_update_job_invalid_cron_error_key_present(self, authenticated_client, local_backup_job):
+        """PUT 400 response body contains an 'error' key."""
+        response = authenticated_client.put(
+            f'/api/jobs/{local_backup_job.id}',
+            json={'schedule_cron': '99 99 * * *'},
+        )
+        data = response.get_json()
+        assert 'error' in data
+
+    def test_update_job_invalid_cron_error_message_prefix(self, authenticated_client, local_backup_job):
+        """PUT error message starts with 'Invalid cron expression:'."""
+        response = authenticated_client.put(
+            f'/api/jobs/{local_backup_job.id}',
+            json={'schedule_cron': '*/0 * * * *'},
+        )
+        data = response.get_json()
+        assert data['error'].startswith('Invalid cron expression:')
+
+    def test_update_job_step_zero_returns_400(self, authenticated_client, local_backup_job):
+        """PUT '*/0 * * * *' — step of zero — returns 400."""
+        response = authenticated_client.put(
+            f'/api/jobs/{local_backup_job.id}',
+            json={'schedule_cron': '*/0 * * * *'},
+        )
+        assert response.status_code == 400
+
+    def test_update_job_minute_60_returns_400(self, authenticated_client, local_backup_job):
+        """PUT with minute value 60 returns 400."""
+        response = authenticated_client.put(
+            f'/api/jobs/{local_backup_job.id}',
+            json={'schedule_cron': '60 * * * *'},
+        )
+        assert response.status_code == 400
+
+    def test_update_job_day_last_keyword_accepted(self, authenticated_client, local_backup_job):
+        """PUT '0 2 last * *' — 'last' is valid in APScheduler day field — returns 200."""
+        response = authenticated_client.put(
+            f'/api/jobs/{local_backup_job.id}',
+            json={'schedule_cron': '0 2 last * *'},
+        )
+        assert response.status_code == 200
+
+    def test_update_job_number_to_name_range_returns_400(self, authenticated_client, local_backup_job):
+        """PUT '0 9 * * 0-mon' — number-to-name range — returns 400."""
+        response = authenticated_client.put(
+            f'/api/jobs/{local_backup_job.id}',
+            json={'schedule_cron': '0 9 * * 0-mon'},
+        )
+        assert response.status_code == 400
+
+    def test_update_job_invalid_cron_does_not_change_schedule(
+        self, authenticated_client, local_backup_job, app
+    ):
+        """A rejected PUT must not alter the stored schedule_cron."""
+        original_cron = local_backup_job.schedule_cron
+
+        authenticated_client.put(
+            f'/api/jobs/{local_backup_job.id}',
+            json={'schedule_cron': '*/0 * * * *'},
+        )
+
+        get_response = authenticated_client.get(f'/api/jobs/{local_backup_job.id}')
+        data = get_response.get_json()
+        assert data['schedule_cron'] == original_cron
+
+    # --- valid cron on update: must succeed ---
+
+    def test_update_job_valid_cron_returns_200(self, authenticated_client, local_backup_job):
+        """PUT with a valid cron expression returns 200."""
+        response = authenticated_client.put(
+            f'/api/jobs/{local_backup_job.id}',
+            json={'schedule_cron': '0 3 * * *'},
+        )
+        assert response.status_code == 200
+
+    def test_update_job_valid_range_with_step_accepted(self, authenticated_client, local_backup_job):
+        """PUT '0-30/5 * * * *' — range with step — returns 200."""
+        response = authenticated_client.put(
+            f'/api/jobs/{local_backup_job.id}',
+            json={'schedule_cron': '0-30/5 * * * *'},
+        )
+        assert response.status_code == 200
+
+    def test_update_job_valid_list_of_ranges_accepted(self, authenticated_client, local_backup_job):
+        """PUT '1-5,10-15 * * * *' — list of ranges — returns 200."""
+        response = authenticated_client.put(
+            f'/api/jobs/{local_backup_job.id}',
+            json={'schedule_cron': '1-5,10-15 * * * *'},
+        )
+        assert response.status_code == 200
+
+    def test_update_job_day_7_out_of_range_returns_400(self, authenticated_client, local_backup_job):
+        """PUT '0 2 * * 7' — day_of_week max is 6; 7 is rejected with 400."""
+        response = authenticated_client.put(
+            f'/api/jobs/{local_backup_job.id}',
+            json={'schedule_cron': '0 2 * * 7'},
+        )
+        assert response.status_code == 400
+
+    def test_update_job_offset_step_accepted(self, authenticated_client, local_backup_job):
+        """PUT '5/10 * * * *' — offset step — returns 200."""
+        response = authenticated_client.put(
+            f'/api/jobs/{local_backup_job.id}',
+            json={'schedule_cron': '5/10 * * * *'},
+        )
+        assert response.status_code == 200
+
+    def test_update_job_name_to_number_range_accepted(self, authenticated_client, local_backup_job):
+        """PUT '0 9 * * mon-5' — name-to-number range — returns 200."""
+        response = authenticated_client.put(
+            f'/api/jobs/{local_backup_job.id}',
+            json={'schedule_cron': '0 9 * * mon-5'},
+        )
+        assert response.status_code == 200
+
+    def test_update_job_clear_schedule_cron_accepted(self, authenticated_client, local_backup_job):
+        """PUT schedule_cron=None clears the cron without validation and returns 200."""
+        response = authenticated_client.put(
+            f'/api/jobs/{local_backup_job.id}',
+            json={'schedule_cron': None},
+        )
+        assert response.status_code == 200

@@ -643,3 +643,152 @@ class TestSchedulerStatusDatabaseFallback:
         assert result['jobs_in_database'] == 2
         assert 'error' in result
         mock_count.assert_called_once()
+
+
+class TestValidateCron:
+    """Unit tests for validate_cron() in app/scheduler.py.
+
+    validate_cron() wraps APScheduler's CronTrigger.from_crontab().  It must
+    return None for every expression that APScheduler accepts and return a
+    non-empty string for every expression that APScheduler rejects.  The
+    function must never raise.
+    """
+
+    # ------------------------------------------------------------------
+    # Valid expressions – must return None
+    # ------------------------------------------------------------------
+
+    def test_valid_every_minute(self):
+        """'* * * * *' — run every minute — is valid."""
+        assert scheduler_module.validate_cron('* * * * *') is None
+
+    def test_valid_daily_at_2am(self):
+        """'0 2 * * *' — daily at 02:00 UTC — is valid."""
+        assert scheduler_module.validate_cron('0 2 * * *') is None
+
+    def test_valid_weekly_on_sunday(self):
+        """'0 2 * * 0' — weekly on Sunday — is valid (0 == Sunday)."""
+        assert scheduler_module.validate_cron('0 2 * * 0') is None
+
+    def test_invalid_day_of_week_7_out_of_range(self):
+        """'0 2 * * 7' — day_of_week max is 6; 7 is rejected by APScheduler."""
+        result = scheduler_module.validate_cron('0 2 * * 7')
+        assert result is not None
+        assert isinstance(result, str)
+
+    def test_valid_step_every_5_minutes(self):
+        """'*/5 * * * *' — every 5 minutes — is valid."""
+        assert scheduler_module.validate_cron('*/5 * * * *') is None
+
+    def test_valid_step_from_offset(self):
+        """'5/10 * * * *' — at minutes 5,15,25,35,45,55 — is valid."""
+        assert scheduler_module.validate_cron('5/10 * * * *') is None
+
+    def test_valid_range_with_step(self):
+        """'0-30/5 * * * *' — every 5 minutes in the first half-hour — is valid."""
+        assert scheduler_module.validate_cron('0-30/5 * * * *') is None
+
+    def test_valid_list_of_ranges(self):
+        """'1-5,10-15 * * * *' — two minute ranges listed — is valid."""
+        assert scheduler_module.validate_cron('1-5,10-15 * * * *') is None
+
+    def test_valid_month_name_abbreviation(self):
+        """'0 0 1 jan *' — abbreviated month name in month field — is valid."""
+        assert scheduler_module.validate_cron('0 0 1 jan *') is None
+
+    def test_valid_day_name_abbreviation(self):
+        """'0 9 * * mon' — abbreviated day name — is valid."""
+        assert scheduler_module.validate_cron('0 9 * * mon') is None
+
+    def test_valid_day_name_range(self):
+        """'0 9 * * mon-fri' — Monday through Friday — is valid."""
+        assert scheduler_module.validate_cron('0 9 * * mon-fri') is None
+
+    def test_valid_name_to_number_range(self):
+        """'0 9 * * mon-5' — name-to-number range (mon to Friday) — is valid."""
+        assert scheduler_module.validate_cron('0 9 * * mon-5') is None
+
+    # ------------------------------------------------------------------
+    # Invalid expressions – must return a non-empty string
+    # ------------------------------------------------------------------
+
+    def test_invalid_too_few_fields(self):
+        """An expression with only 4 fields is invalid (crontab format needs 5)."""
+        result = scheduler_module.validate_cron('* * * *')
+        assert result is not None
+        assert isinstance(result, str)
+        assert len(result) > 0
+
+    def test_invalid_too_many_fields(self):
+        """An expression with 6 fields is invalid for the standard crontab format."""
+        result = scheduler_module.validate_cron('0 2 * * * *')
+        assert result is not None
+        assert isinstance(result, str)
+
+    def test_invalid_minute_out_of_range(self):
+        """Minute value 60 is outside the valid 0-59 range."""
+        result = scheduler_module.validate_cron('60 * * * *')
+        assert result is not None
+        assert isinstance(result, str)
+
+    def test_invalid_hour_out_of_range(self):
+        """Hour value 24 is outside the valid 0-23 range."""
+        result = scheduler_module.validate_cron('0 24 * * *')
+        assert result is not None
+        assert isinstance(result, str)
+
+    def test_invalid_step_zero(self):
+        """'*/0' — step of zero — is invalid (division by zero in schedules)."""
+        result = scheduler_module.validate_cron('*/0 * * * *')
+        assert result is not None
+        assert isinstance(result, str)
+
+    def test_invalid_empty_string(self):
+        """An empty string is not a valid cron expression."""
+        result = scheduler_module.validate_cron('')
+        assert result is not None
+        assert isinstance(result, str)
+
+    def test_invalid_garbage_string(self):
+        """Arbitrary non-cron text is invalid."""
+        result = scheduler_module.validate_cron('not a cron')
+        assert result is not None
+        assert isinstance(result, str)
+
+    def test_invalid_number_to_name_range(self):
+        """'0 9 * * 0-mon' — number-to-name range — is invalid in APScheduler."""
+        result = scheduler_module.validate_cron('0 9 * * 0-mon')
+        assert result is not None
+        assert isinstance(result, str)
+
+    def test_valid_day_field_last_keyword(self):
+        """'last' is a valid day-of-month token in APScheduler crontab."""
+        result = scheduler_module.validate_cron('0 2 last * *')
+        assert result is None
+
+    # ------------------------------------------------------------------
+    # Return-type contract
+    # ------------------------------------------------------------------
+
+    def test_returns_none_type_for_valid(self):
+        """Return value is exactly None (not False, not '') for a valid expression."""
+        result = scheduler_module.validate_cron('0 2 * * *')
+        assert result is None
+
+    def test_returns_str_type_for_invalid(self):
+        """Return value is a str instance (not an exception) for an invalid expression."""
+        result = scheduler_module.validate_cron('bad')
+        assert isinstance(result, str)
+
+    def test_never_raises_on_invalid_input(self):
+        """validate_cron must never propagate ValueError — it must be caught internally."""
+        # These would raise ValueError in CronTrigger.from_crontab directly;
+        # validate_cron must absorb the exception and return a string.
+        for expr in ('*/0 * * * *', '60 * * * *', '', 'garbage', '0 24 * * *'):
+            try:
+                result = scheduler_module.validate_cron(expr)
+                assert result is not None, f"Expected error string for {expr!r}, got None"
+            except Exception as exc:
+                raise AssertionError(
+                    f"validate_cron raised {type(exc).__name__} for {expr!r}: {exc}"
+                ) from exc

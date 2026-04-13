@@ -8,6 +8,7 @@ Manages:
 """
 
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
@@ -18,6 +19,19 @@ from app import db
 from app.models import BackupJob
 from app.backup.executor import execute_backup_job
 from app.backup.retention import enforce_retention_policies
+
+
+def validate_cron(expr: str) -> Optional[str]:
+    """Validate a cron expression using APScheduler's parser.
+
+    Returns None if valid, or the error message string if invalid.
+    Mirrors APScheduler 3.10.4 — update this function if APScheduler is upgraded.
+    """
+    try:
+        CronTrigger.from_crontab(expr, timezone='UTC')
+        return None
+    except ValueError as e:
+        return str(e)
 
 
 # Global scheduler instance and Flask app reference

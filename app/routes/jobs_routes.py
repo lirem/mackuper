@@ -8,7 +8,7 @@ from flask_login import login_required
 
 from app import db, _reinit_crypto_from_stored
 from app.models import BackupJob, BackupHistory
-from app.scheduler import sync_backup_jobs, trigger_backup_now
+from app.scheduler import sync_backup_jobs, trigger_backup_now, validate_cron
 from app.utils.crypto import crypto_manager
 
 
@@ -142,6 +142,11 @@ def create_job():
     if data['compression_format'] not in valid_formats:
         return jsonify({'error': f'Invalid compression format. Valid options: {valid_formats}'}), 400
 
+    if data.get('schedule_cron'):
+        cron_error = validate_cron(data['schedule_cron'])
+        if cron_error:
+            return jsonify({'error': f'Invalid cron expression: {cron_error}'}), 400
+
     # Check if job name already exists
     existing = BackupJob.query.filter_by(name=data['name']).first()
     if existing:
@@ -259,6 +264,10 @@ def update_job(job_id):
         job.compression_format = data['compression_format']
 
     if 'schedule_cron' in data:
+        if data['schedule_cron']:
+            cron_error = validate_cron(data['schedule_cron'])
+            if cron_error:
+                return jsonify({'error': f'Invalid cron expression: {cron_error}'}), 400
         job.schedule_cron = data['schedule_cron']
 
     if 'retention_s3_days' in data:
