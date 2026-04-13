@@ -132,11 +132,11 @@ class TestSyncBackupJobs:
         scheduler_module.flask_app = None
 
     def test_sync_backup_jobs_not_initialized(self):
-        """Test syncing when scheduler not initialized raises error."""
+        """Test syncing when scheduler not initialized returns silently (non-scheduler worker)."""
         scheduler_module.scheduler = None
 
-        with pytest.raises(RuntimeError, match="not initialized"):
-            scheduler_module.sync_backup_jobs()
+        # Should not raise — non-scheduler workers skip sync gracefully
+        scheduler_module.sync_backup_jobs()
 
     @patch('app.scheduler._add_scheduled_job')
     def test_sync_backup_jobs_adds_enabled_job(self, mock_add, db, local_backup_job):

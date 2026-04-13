@@ -145,7 +145,11 @@ def sync_backup_jobs():
     global scheduler
 
     if scheduler is None:
-        raise RuntimeError("Scheduler not initialized")
+        import logging
+        logging.getLogger(__name__).warning(
+            "sync_backup_jobs() called in a non-scheduler worker (scheduler is None) — skipping"
+        )
+        return
 
     # Clean up old manual jobs (one-time jobs from previous "Run Now" clicks)
     # These jobs have already been executed or missed their window
